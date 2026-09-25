@@ -11,7 +11,10 @@ python -m pip install -e '.[dev]'
 ```
 
 The PyPI distribution name is `mdcat-date`; the application name remains
-MD-Cat and the commands remain `md_cat.py` and `simulate.py`.
+MD-Cat. Installed commands are `md_cat.py`, `md_cat_sample.py`,
+`md_cat_summarize.py`, and `simulate.py`. The dating and summary commands
+are packaging entry points into `emd`; the repository-root `md_cat.py`
+is a source-checkout compatibility launcher.
 Package metadata lives in `setup.py`; the sole version definition is
 `PROGRAM_VERSION` in `emd/__init__.py`. The build backend is declared in
 `pyproject.toml`. Keep the dependency list aligned with imports and the solver
@@ -109,3 +112,19 @@ unless they must appear on the PyPI project page.
 If Bioconda is added later, each new upstream version also needs a recipe
 version/source checksum update and a passing Bioconda pull request; a PyPI
 release alone does not guarantee immediate Bioconda availability.
+
+## 1.1.0 validation
+
+Run the focused tests with:
+
+```bash
+python -m unittest discover -s tests -p 'test_*.py'
+```
+
+The sampling tests cover seeded distributions, shared minimum durations,
+process jobs, CI pooling, dry-run external execution, partial summaries,
+resume, input checksums, and paths containing spaces. Package validation
+must also run `md_cat_sample.py` outside the checkout after installing the
+wheel; local `treepl_to_mdcat.py` and `summarize_mdcat.py` are not dependencies
+and must not be included in distributions. See CHANGELOG.md for the release
+summary. The installed workflow records a package version in every manifest.

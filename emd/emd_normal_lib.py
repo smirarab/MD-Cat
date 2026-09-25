@@ -58,14 +58,16 @@ def initialize_rates(k,mu):
         phi.append(p)
     return multinomial(omega,phi)
 
-def MDCat(tree,k,sampling_time=None,bw_time=False,as_date=False,root_time=0,leaf_time=1,nrep=100,maxIter=100,randseed=None,pseudo=1,s=1000,verbose=False,place_mu=True,place_q=False,refTree=None,fixed_tau=False,fixed_omega=False,init_Q=None,CI_options=None,threads=None):
+def MDCat(tree,k,sampling_time=None,bw_time=False,as_date=False,root_time=0,leaf_time=1,nrep=100,maxIter=100,randseed=None,pseudo=1,s=1000,verbose=False,place_mu=True,place_q=False,refTree=None,fixed_tau=False,fixed_omega=False,init_Q=None,CI_options=None,threads=None,min_branch=EPS_tau):
+    if not np.isfinite(min_branch) or min_branch <= 0:
+        raise ValueError("min_branch must be finite and positive")
     _solver_messages.clear()
     smpl_times = setup_smpl_time(tree,sampling_time=sampling_time,bw_time=bw_time,as_date=as_date,root_time=root_time,leaf_time=leaf_time)   
     mu_avg = rtt_mu(tree,smpl_times)
     init_rate_distr = initialize_rates(k,mu_avg) 
-    return EM_date_random_init(tree,smpl_times,init_rate_distr,s=s,nrep=nrep,maxIter=maxIter,refTree=refTree,init_Q=init_Q,fixed_tau=fixed_tau,fixed_omega=fixed_omega,verbose=verbose,mu_avg=mu_avg,randseed=randseed,pseudo=pseudo,place_mu=place_mu,place_q=place_q,as_date=as_date,bw_time=bw_time,CI_options=CI_options,threads=threads)
+    return EM_date_random_init(tree,smpl_times,init_rate_distr,s=s,nrep=nrep,maxIter=maxIter,refTree=refTree,init_Q=init_Q,fixed_tau=fixed_tau,fixed_omega=fixed_omega,verbose=verbose,mu_avg=mu_avg,randseed=randseed,pseudo=pseudo,place_mu=place_mu,place_q=place_q,as_date=as_date,bw_time=bw_time,CI_options=CI_options,threads=threads,eps_tau=min_branch)
 
-def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=100,refTree=None,init_Q=None,fixed_tau=False,verbose=False,mu_avg=None,fixed_omega=False,randseed=None,pseudo=0,place_mu=True,place_q=False,as_date=False,bw_time=False,CI_options=None,threads=None):
+def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=100,refTree=None,init_Q=None,fixed_tau=False,verbose=False,mu_avg=None,fixed_omega=False,randseed=None,pseudo=0,place_mu=True,place_q=False,as_date=False,bw_time=False,CI_options=None,threads=None,eps_tau=EPS_tau):
     best_llh = -float("inf")
     best_tree = None
     best_phi = None
@@ -90,7 +92,7 @@ def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=
         print("Random seed: " + str(rseeds[r]))
         new_tree = read_tree_newick(tree.newick())
         #try:
-        ans,constr = EM_date(new_tree,smpl_times,init_rate_distr,s=s,maxIter=maxIter,refTree=refTree,init_Q=init_Q,fixed_tau=fixed_tau,verbose=verbose,mu_avg=mu_avg,fixed_omega=fixed_omega,pseudo=pseudo,threads=threads)
+        ans,constr = EM_date(new_tree,smpl_times,init_rate_distr,s=s,maxIter=maxIter,refTree=refTree,init_Q=init_Q,fixed_tau=fixed_tau,verbose=verbose,mu_avg=mu_avg,fixed_omega=fixed_omega,pseudo=pseudo,threads=threads,eps_tau=eps_tau)
         tau,omega,phi,llh,Q = ans['tau'],ans['omega'],ans['phi'],ans['llh'],ans['Q']
         convert_to_time(new_tree,tau,omega,phi,Q)
         new_ref = new_tree
@@ -99,7 +101,7 @@ def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=
         phi_adjusted = [p for p in phi if p > 1e-6]
         sum_phi = sum(phi_adjusted)
         phi_adjusted = [p/sum_phi for p in phi_adjusted]
-        ans,constr = EM_date(new_tree,smpl_times,s=s,init_rate_distr=multinomial(omega_adjusted,phi_adjusted),maxIter=maxIter,refTree=new_ref,init_Q=None,fixed_tau=fixed_tau,verbose=verbose,mu_avg=None,fixed_omega=fixed_omega,pseudo=pseudo,threads=threads)
+        ans,constr = EM_date(new_tree,smpl_times,s=s,init_rate_distr=multinomial(omega_adjusted,phi_adjusted),maxIter=maxIter,refTree=new_ref,init_Q=None,fixed_tau=fixed_tau,verbose=verbose,mu_avg=None,fixed_omega=fixed_omega,pseudo=pseudo,threads=threads,eps_tau=eps_tau)
         tau,omega,phi,llh,Q = ans['tau'],ans['omega'],ans['phi'],ans['llh'],ans['Q']
         #convert branch length to time unit and compute mu for each branch
         convert_to_time(new_tree,tau,omega,phi,Q)
@@ -126,7 +128,7 @@ def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=
     # place confidence intervals
     if CI_options is not None:    
         b,M,dt = constr['b'],constr['M'],constr['dt']
-        get_confidence_interval(best_tree,smpl_times,best_tau,best_omega,best_Q,np.array(b),s,M,dt,CI_options,eps_tau=EPS_tau,threads=threads,bw_time=bw_time,as_date=as_date)
+        get_confidence_interval(best_tree,smpl_times,best_tau,best_omega,best_Q,np.array(b),s,M,dt,CI_options,eps_tau=eps_tau,threads=threads,bw_time=bw_time,as_date=as_date)
         convert_to_time(best_tree,best_tau,best_omega,best_phi,best_Q)
         compute_divergence_time(best_tree,smpl_times)
         annotate_divergence_time(best_tree,place_mu=place_mu,place_q=place_q,as_date=as_date,bw_time=bw_time)
@@ -138,7 +140,7 @@ def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=
 
 def EM_date(tree,smpl_times,init_rate_distr,refTree=None,s=1000,df=5e-4,maxIter=100,eps_tau=EPS_tau,fixed_tau=False,verbose=False,mu_avg=None,fixed_omega=False,pseudo=0,init_Q=None,threads=None):
     M, dt, b = setup_constr(tree,smpl_times,s,eps_tau=eps_tau,pseudo=pseudo)
-    Q, tau, phi, omega = init_EM(tree,b,init_rate_distr,s=s,refTree=refTree,init_Q=init_Q)
+    Q, tau, phi, omega = init_EM(tree,b,init_rate_distr,s=s,refTree=refTree,init_Q=init_Q,eps_tau=eps_tau)
     if verbose:
         print("Initialized EM")
     pre_llh = f_ll(b,s,tau,omega,phi,var_apprx=True) if tau is not None else None
@@ -179,7 +181,7 @@ def convert_to_time(tree,tau,omega,phi,Q):
     # convert branch length to time unit and compute mu for each branch
     for node in tree.traverse_postorder():
         if not node.is_root():
-            node.set_edge_length(round(tau[node.idx],nDIGITS))
+            node.set_edge_length(float(tau[node.idx]))
             node.mu = round(sum(o*p for (o,p) in zip(omega,Q[node.idx])),nDIGITS)
             node.q = [round(x,nDIGITS) for x in Q[node.idx]]
         else:
@@ -287,7 +289,7 @@ def init_EM(tree,b,init_rate_distr,init_Q=None,s=1000,refTree=None,eps_tau=EPS_t
         for node in tree.traverse_preorder():
             if not node.is_root():
                 b_i = node.get_edge_length()
-                tau[node.idx] = b_i/omega[randrange(len(omega))]
+                tau[node.idx] = max(eps_tau, b_i/omega[randrange(len(omega))])
         #tau = [b_i/omega[randrange(len(omega))] for b_i in b]
         Q = run_Estep(b,s,omega,tau,phi,var_apprx=True)
     return Q,tau,phi,omega
@@ -815,6 +817,8 @@ def compute_CI(a_list,p_lower=0.025,p_upper=0.975):
     return s_list[idx_lower],s_list[idx_higher]
 
 def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_tau=EPS_tau,threads=None,bw_time=False,as_date=False):
+    if CI_options.get('seed') is not None:
+        seed(CI_options['seed'])
     nboots = CI_options['nboots']
     p_lower = CI_options['p_lower']
     p_upper = CI_options['p_upper']

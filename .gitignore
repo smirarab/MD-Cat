@@ -5,6 +5,8 @@
 !/tests/test_threads.py
 !/tests/test_ci.py
 !/tests/test_ci_cli.py
+!/tests/test_sampling.py
+!/tests/test_summary_package.py
 *.tre
 *temp*
 *.pyc

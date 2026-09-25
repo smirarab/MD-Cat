@@ -10,7 +10,7 @@ MD-Cat is a method for dating phylogenetic trees. Given a phylogeny and either s
 Available at <http://doi.org/10.1093/sysbio/syae034>
 
 #### Contact
-Please submit questions and bug reports as [issues](https://github.com/uym2/MD-Cat/issues).
+Please submit questions and bug reports as [issues](https://github.com/smirarab/MD-Cat/issues).
 
 # Installation
 
@@ -52,7 +52,7 @@ To obtain a free academic license, visit MOSEK's website.
 
 # Usage
 
-MD-Cat accepts calibration points (hard constraints on divergence times) for internal nodes, sampling times at leaf nodes, and a mixture of the two. Below we give examples for the three most common use-cases. All examples are given in the folder [use_cases](use_cases) of this repository.
+MD-Cat accepts calibration points (hard constraints on divergence times) for internal nodes, sampling times at leaf nodes, and a mixture of the two. Below we give examples for some most common use-cases. All examples are given in the folder [use_cases](use_cases) of this repository.
 
 Notes:
 
@@ -61,21 +61,8 @@ from any directory after activating the environment. The `python md_cat.py`
 and relative-path examples below assume a source checkout. 
 * Example data are
 available in the repository, not bundled in the wheel.
+* Since version 1.1.0, we have created a new method called `md_cat_sample.py` which allows the use of TreePL style calibration ranges by sampling fixed points from them. 
 
-
-## Export CI replicate trees
-
-Add `--CI-samples FILE` together with `--CI` to save every CI replicate:
-
-```bash
-python md_cat.py -i input.nwk -o dated.nwk --CI "100 0.025 0.975" --CI-samples ci_samples.nwk
-```
-
-After all CI samples succeed, `ci_samples.nwk` contains 100 Newick trees,
-one per line in sampling order. Each tree preserves the topology and labels,
-with branch lengths equal to that replicate's estimated durations. Node comments
-record `t` (divergence time) and, for non-root nodes, `mu` (the drawn mutation
-rate). The samples file is overwritten if it already exists. 
 
 ## Use case 1: Infer the unit ultrametric tree
 If there is no calibration given, MD-Cat will infer the unit (depth 1) ultrametric tree.
@@ -215,6 +202,41 @@ The output tree ```output.nwk``` is ultrametric, has branch lengths in time unit
 * By default, the leaf nodes are set to present time (t = 0). You can adjust the leaf time using the `-f` option.
 * The output tree has internal node labels the same as the input tree, except for the two calibration points "Myrtales" and "Archaefructus" assigned by user via `input.txt`.
 
+## Use case 4: Using calibration ranges with sampling
+
+Since version 1.1.0, `md_cat_sample.py` accepts treePL-style calibration ranges,
+samples fixed ages within them, and combines multiple dating runs into one
+summary tree. Each calibration in `calibrations.config` specifies an MRCA and
+both age bounds, for example:
+
+```text
+mrca = Myrtales Terminalia Eucalyptus
+min = Myrtales 80
+max = Myrtales 100
+```
+
+Ages must be measured backward from the present, with all tips at time zero;
+do not add `-b`. Run the installed command:
+
+```bash
+md_cat_sample.py -i input.nwk -t calibrations.config -o summary.nex \
+  -S 100 --randSeed 42 --jobs 4 --threads 2 --CI "100 0.025 0.975"
+```
+
+* By default, calibration ages are sampled bottom-up using shifted exponential
+  distributions, respecting the bounds and ancestor ordering. Use
+  `--strategy independent` or `--distribution uniform` to change this.
+* `-S` controls calibration samples; `-p` controls optimization initializations
+  **per run** (default: 100). `--jobs` controls concurrent runs, and `--threads`
+  controls numerical threads per run.
+* `summary.nex` contains mean node ages; `--summary median` selects medians.
+  The example pools 100 CI replicates per run to obtain 95% intervals.
+  Omit `--CI` for a central estimate only.
+* All sampled calibrations, fitted trees, and logs are retained in
+  `summary.nex.runs/`. Use `--dry-run` to prepare jobs without executing them.
+
+See the [sampling guide](SAMLING.md) for input settings, output formats,
+parallel execution, resume, and partial summaries.
 
 # Controlling CPU usage
 

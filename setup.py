@@ -20,9 +20,14 @@ setup(
     python_requires=">=3.10",
     packages=["emd", "simulator"],
     include_package_data=False,
-    scripts=["md_cat.py", "simulate.py"],
+    scripts=["simulate.py"],
+    entry_points={"console_scripts": [
+        "md_cat.py=emd.cli:main",
+        "md_cat_sample.py=emd.sample:main",
+        "md_cat_summarize.py=emd.summary:main",
+    ]},
     install_requires=[
-        "treeswift", "scipy>=1.3.1", "bitsets", "numpy>=1.18.5",
+        "treeswift", "scipy>=1.6", "bitsets", "numpy>=1.18.5",
         "jenkspy", "mosek", "cvxpy", "cvxopt", "osqp",
     ],
     extras_require={"dev": ["build", "twine"]},
