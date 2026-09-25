@@ -33,6 +33,13 @@ class multinomial:
         self.acc = cdf_from_pdf(phi) # accumulative density        
 
     def get_quantize(self,q):
+        if not 0 <= q <= 1:
+            raise ValueError("quantile must be between 0 and 1 inclusive")
+        # Handle endpoints explicitly, including cumulative rounding below 1.
+        if q == 0:
+            return self.omega[0]
+        if q == 1:
+            return self.omega[-1]
         i = binary_search(self.acc,q)
         return self.omega[i]
     
