@@ -3,7 +3,11 @@
 MD-Cat is a method for dating phylogenetic trees. Given a phylogeny and either sampling times for leaves or calibration points for internal nodes, MD-Cat outputs a "dated" tree that conforms to the sampling times or calibration points. MD-Cat relaxes the molecular clock assumption by approximating the rate distribution by a categorical distribution. The only required parameter for this model is the number of rate categories, which is default to 50.
 
 #### Publication
-Mai, Uyen, Eduardo Charvel, and Siavash Mirarab. “Expectation-Maximization enables Phylogenetic Dating under a Categorical Rate Model.” bioRxiv (2022).
+
+
+> Mai, Uyen, Eduardo Charvel, and Siavash Mirarab. 2024. “Expectation-Maximization Enables Phylogenetic Dating under a Categorical Rate Model.” Systematic Biology 73(5):823–38. doi:10.1093/sysbio/syae034.
+
+Available at <http://doi.org/10.1093/sysbio/syae034>
 
 #### Contact
 Please submit questions and bug reports as [issues](https://github.com/uym2/MD-Cat/issues).
@@ -45,14 +49,19 @@ installing its Python package does not grant one. The dating command tries
 MOSEK first and falls back to other solvers if it is unavailable or unlicensed.
 To obtain a free academic license, visit MOSEK's website.
 
-The main installed command is  `md_cat.py`; run it directly
-from any directory after activating the environment. The `python md_cat.py`
-and relative-path examples below assume a source checkout. Example data are
-available in the repository, not bundled in the wheel.
-
 
 # Usage
+
 MD-Cat accepts calibration points (hard constraints on divergence times) for internal nodes, sampling times at leaf nodes, and a mixture of the two. Below we give examples for the three most common use-cases. All examples are given in the folder [use_cases](use_cases) of this repository.
+
+Notes:
+
+* The main installed command is  `md_cat.py`, which you can run directly
+from any directory after activating the environment. The `python md_cat.py`
+and relative-path examples below assume a source checkout. 
+* Example data are
+available in the repository, not bundled in the wheel.
+
 
 ## Use case 1: Infer the unit ultrametric tree
 If there is no calibration given, MD-Cat will infer the unit (depth 1) ultrametric tree.
@@ -71,7 +80,7 @@ The output tree is ```output.nwk```.
 * It is an ultrametric tree and has depth (root-to-tip distance) 1.
 * The relative divergence time and mutation rate of all internal nodes are annotated on the tree inside the square brackets with attribute `t`, as in, `[t=0.5261,mu=0.0764]`.
 
-***Note: To reduce run time and show informative messages, we use the flags `-p 1` and `-v`. By default, `-p` is set to 100 and we recommend not reducing it to below 10 to allow a thorough optimization. Run `md_cat.py` with `-h` to learn more about these options.
+**IMPORTANT Note:** To reduce run time and show informative messages, we use the flags `-p 1` and `-v`. By default, `-p` is set to 100 and we recommend not reducing it to below 10 to allow a thorough optimization. Run `md_cat.py` with `-h` to learn more about these options.
 
 ## Use case 2: Infer the time tree from phylodynamics data
 A typical use-case in virus phylogeny is to infer the time tree from a phylogram inferred from sequences and their sampling times (i.e. calibration points given at leaf nodes). MD-Cat reads the calibration points or sampling times from an input file via the `-t` option.
@@ -202,13 +211,8 @@ threads, including confidence-interval estimation:
 python md_cat.py -i input.nwk -o output.nwk --threads 2
 ```
 
-The count must be a positive integer. If omitted, MD-Cat keeps the existing
-library defaults and environment settings. An explicit count overrides
-`OMP_NUM_THREADS`, `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`, `BLIS_NUM_THREADS`,
-and `VECLIB_MAXIMUM_THREADS` before numerical libraries are imported, and sets
-MOSEK's `MSK_IPAR_NUM_THREADS` parameter for each solve. This controls library
-thread limits, not CPU affinity or a process-wide CPU quota. Initialization
-replicates still run sequentially; `-p` controls the number of replicates.
+If omitted, MD-Cat keeps the existing
+library defaults and environment settings. 
 
 # Other useful options
 
@@ -219,8 +223,8 @@ confidence intervals; `-v` is not required.
 
 The following options are useful to explore:
 
-* `-v` can be used to turn on the verbose mode.
-* `-k 50` (or some other number) can be used to specify the number of rate categories. Default is 50.
+* `-v` can be used to turn on verbose mode.
+* `-k 50` (or some other number) can be used to specify the number of rate categories. The default is 50.
 * `-p 100` (or some other number) can be used to specify the number of times the optimization problem is solved, each starting from a different initial point. Default is 100. 
 * `-l` can be used to set the length of the sequences from which the tree is inferred. Impacts the pseudocount used internally by MD-Cat for super short branches.
 * `-r` and `-f` can be used to set the time at the root and the leaves.
