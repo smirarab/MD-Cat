@@ -1,0 +1,37 @@
+name: Publish to PyPI
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+jobs:
+  validate:
+    uses: ./.github/workflows/package.yml
+  publish:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/mdcat-date/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist
+      - name: Check release tag against built metadata
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python - <<'PY'
+          import email, os, pathlib, zipfile
+          wheels = list(pathlib.Path('dist').glob('*.whl'))
+          assert len(wheels) == 1, wheels
+          with zipfile.ZipFile(wheels[0]) as wheel:
+              name, = [n for n in wheel.namelist() if n.endswith('.dist-info/METADATA')]
+              metadata = email.message_from_bytes(wheel.read(name))
+          assert metadata['Name'] == 'mdcat-date', 'Unexpected distribution name'
+          assert os.environ['RELEASE_TAG'] == 'v' + metadata['Version'], 'Release tag must match package version'
+          PY
+      - uses: pypa/gh-action-pypi-publish@release/v1

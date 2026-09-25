@@ -1,0 +1,39 @@
+name: Validate package
+on:
+  push:
+  pull_request:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  package:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ['3.10', '3.12', '3.13']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install --upgrade pip build twine
+      # Build the wheel from the sdist to detect missing source files.
+      - run: python -m build
+      - run: python -m twine check --strict dist/*
+      - run: python -m pip install --force-reinstall dist/*.whl
+      - run: python -m pip check
+      - name: Exercise the installed package outside the checkout
+        working-directory: ${{ runner.temp }}
+        run: |
+          md_cat.py -h
+          simulate.py -h
+          python -c "from simulator.multinomial import emperical_histogram; emperical_histogram([1., 2., 3., 4.], 2)"
+          echo '(A:0.1,B:0.2);' > input.nwk
+          md_cat.py -i input.nwk -o output.nwk -k 2 -p 1 --maxIter 2 --randSeed 1 --threads 1 --CI '2 0.025 0.975'
+          python -c "from pathlib import Path; from treeswift import read_tree_newick; p = Path('output.nwk'); assert p.stat().st_size; assert len(list(read_tree_newick(p.read_text()).traverse_leaves())) == 2"
+      - uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.12'
+        with:
+          name: distributions
+          path: dist/*

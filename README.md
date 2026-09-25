@@ -9,37 +9,47 @@ Mai, Uyen, Eduardo Charvel, and Siavash Mirarab. “Expectation-Maximization ena
 Please submit questions and bug reports as [issues](https://github.com/uym2/MD-Cat/issues).
 
 # Installation
-MD-Cat has been tested on MacOS and Linux.
 
-### Prerequisites
-
-You need to have:
-* Python >= 3.7
-
-### Install from source code
-
-1. Download the source code.  
-	* Either clone the repository to your machine 
-
-	```bash
-	   git clone https://github.com/uym2/MD-Cat.git
-	```
-	* or simply download [this zip file](https://github.com/uym2/MD-Cat/archive/master.zip) to your machine and unzip it in your preferred destination. 
-2. To install, go to the MD-Cat folder. 
-	* If you have ```pip```, use
-	```bash
-	   python3 -m pip install .
-	```
-	* Otherwise, type
-	``` bash
-	   python3 setup.py install
-	```
-After installation, run:
+MD-Cat runs on macOS and Linux. The packaged release requires Python 3.10 or
+newer; Python 3.12 is recommended. Use a virtual environment:
 
 ```bash
-python3 md_cat.py -h
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
 ```
-to see the commandline help of MD-Cat.
+
+### Install from source (available now)
+
+```bash
+git clone https://github.com/uym2/MD-Cat.git
+cd MD-Cat
+python -m pip install .
+md_cat.py -h
+```
+
+### Install the PyPI
+
+MD-Cat is available on pip under
+`mdcat-date`. To install or upgrade use:
+
+```bash
+python -m pip install --upgrade mdcat-date
+md_cat.py -h
+```
+
+
+Pip installs the required Python libraries, including MOSEK and the open-source
+OSQP and CVXOPT solvers. Using MOSEK requires a separately obtained license;
+installing its Python package does not grant one. The dating command tries
+MOSEK first and falls back to other solvers if it is unavailable or unlicensed.
+To obtain a free academic license, visit MOSEK's website.
+
+The main installed command is  `md_cat.py`; run it directly
+from any directory after activating the environment. The `python md_cat.py`
+and relative-path examples below assume a source checkout. Example data are
+available in the repository, not bundled in the wheel.
+
 
 # Usage
 MD-Cat accepts calibration points (hard constraints on divergence times) for internal nodes, sampling times at leaf nodes, and a mixture of the two. Below we give examples for the three most common use-cases. All examples are given in the folder [use_cases](use_cases) of this repository.

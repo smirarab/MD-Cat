@@ -1,30 +1,39 @@
-from setuptools import setup, find_packages
-import emd
-from os import walk, listdir
-from os.path import join,normpath,isfile
+"""Package metadata; build with python -m build."""
+from pathlib import Path
+from setuptools import setup
 
-param = {
-    'name': emd.PROGRAM_NAME,
-    'version': emd.PROGRAM_VERSION,
-    'description': emd.PROGRAM_DESCRIPTION,
-    'author': emd.PROGRAM_AUTHOR,
-    'license': emd.PROGRAM_LICENSE,
-    'packages': find_packages(),
-    'include_package_data': True,
-    'scripts' : ['md_cat.py','simulate.py'],
-    'zip_safe': True,
-    'install_requires': ['treeswift','scipy>=1.3.1','bitsets','numpy>=1.18.5','jenkspy','mosek','cvxpy','cvxopt'],
-    'keywords': 'Phylogenetics Evolution Biology',
-    'long_description': """A Python implementation of the MD-Cat algorithm""",
-    'classifiers': ["Environment :: Console",
-                    "Intended Audience :: Developers",
-                    "Intended Audience :: Science/Research",
-                    "License :: OSI Approved :: GNU General Public License (GPL)",
-                    "Natural Language :: English",
-                    "Operating System :: OS Independent",
-                    "Programming Language :: Python",
-                    "Topic :: Scientific/Engineering :: Bio-Informatics",
-                    ],
-    }
-    
-setup(**param)
+ROOT = Path(__file__).parent
+metadata = {}
+exec((ROOT / "emd" / "__init__.py").read_text(encoding="utf-8"), metadata)
+
+setup(
+    name="mdcat-date",
+    version=metadata["PROGRAM_VERSION"],
+    description=metadata["PROGRAM_DESCRIPTION"],
+    author=", ".join(metadata["PROGRAM_AUTHOR"]),
+    license=metadata["PROGRAM_LICENSE"],
+    license_files=["LICENSE"],
+    url="https://github.com/uym2/MD-Cat",
+    project_urls={"Issues": "https://github.com/uym2/MD-Cat/issues"},
+    long_description=(ROOT / "README.md").read_text(encoding="utf-8"),
+    long_description_content_type="text/markdown",
+    python_requires=">=3.10",
+    packages=["emd", "simulator"],
+    include_package_data=False,
+    scripts=["md_cat.py", "simulate.py"],
+    install_requires=[
+        "treeswift", "scipy>=1.3.1", "bitsets", "numpy>=1.18.5",
+        "jenkspy", "mosek", "cvxpy", "cvxopt", "osqp",
+    ],
+    extras_require={"dev": ["build", "twine"]},
+    keywords="Phylogenetics Evolution Biology",
+    classifiers=[
+        "Environment :: Console",
+        "Intended Audience :: Science/Research",
+        "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+        "Natural Language :: English",
+        "Operating System :: OS Independent",
+        "Programming Language :: Python :: 3",
+        "Topic :: Scientific/Engineering :: Bio-Informatics",
+    ],
+)

@@ -127,7 +127,7 @@ def emperical_histogram(observes,k):
 # k is the number of bins
 # here we use Jenks natural breaks optimization to select the bins
     observes.sort()
-    breaks = jenkspy.jenks_breaks(observes, nb_class=k) 
+    breaks = jenkspy.jenks_breaks(observes, k)
     print(observes)
     print(breaks)
 

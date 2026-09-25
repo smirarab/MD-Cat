@@ -1,0 +1,7 @@
+include LICENSE README.md DEVELOPMENT.md pyproject.toml
+recursive-include emd *.py
+recursive-include simulator *.py
+global-exclude *.pyc *.lic
+prune build
+prune dist
+prune tests

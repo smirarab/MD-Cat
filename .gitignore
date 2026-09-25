@@ -7,3 +7,10 @@
 *temp*
 *.pyc
 **/__pycache__
+
+# Local packaging artifacts and solver licenses
+/build/
+/dist/
+/*.egg-info/
+/.venv/
+*.lic
