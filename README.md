@@ -75,11 +75,7 @@ After all CI samples succeed, `ci_samples.nwk` contains 100 Newick trees,
 one per line in sampling order. Each tree preserves the topology and labels,
 with branch lengths equal to that replicate's estimated durations. Node comments
 record `t` (divergence time) and, for non-root nodes, `mu` (the drawn mutation
-rate). Time annotations respect `-b` and `--asDate`; numeric values are written
-without the rounding used for the summary annotations. The usual `-o` output
-still contains the fitted tree and CI summaries. The samples file is overwritten
-if it already exists. These are the CI draws, not the initialization replicates
-requested by `-p`.
+rate). The samples file is overwritten if it already exists. 
 
 ## Use case 1: Infer the unit ultrametric tree
 If there is no calibration given, MD-Cat will infer the unit (depth 1) ultrametric tree.

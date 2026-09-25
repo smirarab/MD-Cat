@@ -843,40 +843,57 @@ def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_
     print("Confidence intervals: estimating {} samples".format(nboots), flush=True)
     for i in range(nboots):
         started = time.monotonic()
-        print("CI sample {}/{}: drawing rates and solving".format(i+1, nboots), flush=True)
-        for node in tree.traverse_postorder():
-            if node.is_root():
-                continue
-            phi = [1/k]*k
-            R = multinomial(omega,phi)
-            mu_boots[i][node.idx] = R.randomize()
-            b_boots[i][node.idx] = b[node.idx]
-        mu = mu_boots[i]
-        bb = b_boots[i]
-        var_tau = cp.Variable(N)
-        W = np.diag([sqrt(s/x) for x in bb])
-        objective = cp.Minimize(cp.sum_squares(W @ (bb-np.diag(mu) @ var_tau)))
-        constraints = [np.zeros(N)+eps_tau <= var_tau, csr_matrix(M)@var_tau == np.array(dt)]
-        prob = cp.Problem(objective,constraints)
-        failures = []
-        for solver in (cp.MOSEK, cp.OSQP, cp.CVXOPT, cp.ECOS):
-            print("CI sample {}/{}: trying {}".format(i+1, nboots, solver), flush=True)
-            options = {"mosek_params": {"MSK_IPAR_NUM_THREADS": threads}} if solver == cp.MOSEK and threads is not None else {}
-            try:
-                _solve_logged(prob, solver, context="confidence intervals", **options)
-            except Exception as exc:
-                failures.append("{}: {}: {}".format(solver, type(exc).__name__, " ".join(str(exc).split())))
-                continue
-            if prob.status != cp.OPTIMAL or var_tau.value is None or not np.all(np.isfinite(var_tau.value)):
-                failures.append("{}: status {}; missing or non-finite solution, or status not optimal".format(solver, prob.status))
-                continue
-            tau_boots[i] = var_tau.value.copy()
-            break
+        retry_solver = None
+        for attempt in range(1, 11):
+            print("CI sample {}/{}: draw {}/10".format(i+1, nboots, attempt), flush=True)
+            for node in tree.traverse_postorder():
+                if node.is_root():
+                    continue
+                R = multinomial(omega, [1/k]*k)
+                mu_boots[i][node.idx] = R.randomize()
+                b_boots[i][node.idx] = b[node.idx]
+            mu = mu_boots[i]
+            bb = b_boots[i]
+            var_tau = cp.Variable(N)
+            W = np.diag([sqrt(s/x) for x in bb])
+            objective = cp.Minimize(cp.sum_squares(W @ (bb-np.diag(mu) @ var_tau)))
+            constraints = [np.zeros(N)+eps_tau <= var_tau, csr_matrix(M)@var_tau == np.array(dt)]
+            prob = cp.Problem(objective,constraints)
+            failures = []
+            solvers = (retry_solver,) if retry_solver is not None else (cp.MOSEK, cp.OSQP, cp.CVXOPT, cp.ECOS)
+            for solver in solvers:
+                print("CI sample {}/{}: trying {}".format(i+1, nboots, solver), flush=True)
+                options = {"mosek_params": {"MSK_IPAR_NUM_THREADS": threads}} if solver == cp.MOSEK and threads is not None else {}
+                try:
+                    _solve_logged(prob, solver, context="confidence intervals", **options)
+                except Exception as exc:
+                    failures.append("{}: {}: {}".format(solver, type(exc).__name__, " ".join(str(exc).split())))
+                    continue
+                retry_solver = solver
+                break
+            else:
+                if retry_solver is None:
+                    raise RuntimeError("CI sample {}/{} failed with every solver. {}".format(
+                        i+1, nboots, "; ".join(failures)))
+            detail = None
+            if failures and prob.status is None:
+                detail = "; ".join(failures)
+            elif prob.status != cp.OPTIMAL or var_tau.value is None or not np.all(np.isfinite(var_tau.value)):
+                detail = "status {}; missing or non-finite solution, or status not optimal".format(prob.status)
+            else:
+                # Status alone does not guarantee primal feasibility.
+                min_tau = float(np.min(var_tau.value))
+                bound_tolerance = min(1e-8, eps_tau * 1e-5)
+                if min_tau < 0 or min_tau < eps_tau - bound_tolerance:
+                    detail = "minimum branch length {:.12g} violates lower bound {:.12g}".format(min_tau, eps_tau)
+            if detail is None:
+                tau_boots[i] = var_tau.value.copy()
+                break
+            print("CI sample {}/{}: discarding draw {}/10 from {}: {}".format(
+                i+1, nboots, attempt, solver, detail), flush=True)
         else:
-            raise RuntimeError(
-                "CI sample {}/{} failed with every solver. No new rates were drawn; "
-                "check solver availability, licenses, and calibration feasibility. {}".format(
-                    i+1, nboots, "; ".join(failures)))
+            raise RuntimeError("CI sample {}/{} failed after 10 draws with {}: {}".format(
+                i+1, nboots, retry_solver, detail))
         for node in tree.traverse_postorder():
             if not node.is_root():
                 node.edge_length = tau_boots[i][node.idx]
