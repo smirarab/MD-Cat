@@ -12,6 +12,7 @@ from random import seed,uniform, random, randrange
 from simulator.multinomial import *
 from scipy.stats import norm
 import time
+from copy import deepcopy
 import cvxpy as cp
 from scipy.sparse import csr_matrix
 import mosek
@@ -125,7 +126,7 @@ def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=
     # place confidence intervals
     if CI_options is not None:    
         b,M,dt = constr['b'],constr['M'],constr['dt']
-        get_confidence_interval(best_tree,smpl_times,best_tau,best_omega,best_Q,np.array(b),s,M,dt,CI_options,eps_tau=EPS_tau,threads=threads)
+        get_confidence_interval(best_tree,smpl_times,best_tau,best_omega,best_Q,np.array(b),s,M,dt,CI_options,eps_tau=EPS_tau,threads=threads,bw_time=bw_time,as_date=as_date)
         convert_to_time(best_tree,best_tau,best_omega,best_phi,best_Q)
         compute_divergence_time(best_tree,smpl_times)
         annotate_divergence_time(best_tree,place_mu=place_mu,place_q=place_q,as_date=as_date,bw_time=bw_time)
@@ -813,7 +814,7 @@ def compute_CI(a_list,p_lower=0.025,p_upper=0.975):
     idx_higher = ceil(p_upper*N)-1
     return s_list[idx_lower],s_list[idx_higher]
 
-def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_tau=EPS_tau,threads=None):
+def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_tau=EPS_tau,threads=None,bw_time=False,as_date=False):
     nboots = CI_options['nboots']
     p_lower = CI_options['p_lower']
     p_upper = CI_options['p_upper']
@@ -893,4 +894,19 @@ def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_
             tau_list = [tau_boots[i][node.idx] for i in range(nboots)]
             tau_lower,tau_upper = compute_CI(tau_list,p_lower=p_lower,p_upper=p_upper)
             node.tau_CI = (p_lower,tau_lower,p_upper,tau_upper)
+    samples_file = CI_options.get('samples_file')
+    if samples_file is not None:
+        # Serialize copies so sample annotations never change the fitted tree.
+        sample_tree = deepcopy(tree)
+        with open(samples_file, 'w') as output:
+            for i in range(nboots):
+                for node in sample_tree.traverse_postorder():
+                    t = divTime_boots[i][node.idx]
+                    displayed_time = years_to_date(t) if as_date else str(float(-t if bw_time else t))
+                    node.node_params = {'t': displayed_time}
+                    if not node.is_root():
+                        node.edge_length = float(tau_boots[i][node.idx])
+                        node.node_params['mu'] = float(mu_boots[i][node.idx])
+                output.write(sample_tree.newick() + '\n')
+        print("Wrote {} CI replicate trees to {}".format(nboots, samples_file), flush=True)
     #return tau_boots    

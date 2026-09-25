@@ -63,6 +63,24 @@ and relative-path examples below assume a source checkout.
 available in the repository, not bundled in the wheel.
 
 
+## Export CI replicate trees
+
+Add `--CI-samples FILE` together with `--CI` to save every CI replicate:
+
+```bash
+python md_cat.py -i input.nwk -o dated.nwk --CI "100 0.025 0.975" --CI-samples ci_samples.nwk
+```
+
+After all CI samples succeed, `ci_samples.nwk` contains 100 Newick trees,
+one per line in sampling order. Each tree preserves the topology and labels,
+with branch lengths equal to that replicate's estimated durations. Node comments
+record `t` (divergence time) and, for non-root nodes, `mu` (the drawn mutation
+rate). Time annotations respect `-b` and `--asDate`; numeric values are written
+without the rounding used for the summary annotations. The usual `-o` output
+still contains the fitted tree and CI summaries. The samples file is overwritten
+if it already exists. These are the CI draws, not the initialization replicates
+requested by `-p`.
+
 ## Use case 1: Infer the unit ultrametric tree
 If there is no calibration given, MD-Cat will infer the unit (depth 1) ultrametric tree.
 

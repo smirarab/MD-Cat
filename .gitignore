@@ -3,6 +3,8 @@
 !/tests/
 /tests/*
 !/tests/test_threads.py
+!/tests/test_ci.py
+!/tests/test_ci_cli.py
 *.tre
 *temp*
 *.pyc

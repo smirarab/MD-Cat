@@ -51,6 +51,8 @@ parser.add_argument("-v","--verbose",action='store_true',help="Verbose")
 parser.add_argument("--maxIter",required=False,help="The maximum number of iterations for EM search. Default: 100")
 parser.add_argument("--CI", required=False, type=ci_options, metavar='"N LOWER UPPER"',
                     help='Estimate confidence intervals for branch lengths. Pass three space-separated numbers inside one pair of quotes (no commas): N is a positive integer number of posterior mutation-rate samples; quantiles must satisfy 0 <= LOWER < UPPER <= 1 (not percentages; 0 and 1 select the minimum and maximum). Example: --CI "100 0.025 0.975" uses 100 samples for a 95%% confidence interval. Default: off.')
+parser.add_argument("--CI-samples", metavar="FILE",
+                    help="Write every CI replicate to FILE, one Newick tree per line, with sampled time branch lengths and node time/rate annotations. Requires --CI; N samples produce N trees.")
 #parser.add_argument("--nSamplings",required=False,type=int,default=100,help="The number of repeating samplings on mutation rate posteriors to estimate the confidence interval for branch lengths. Default: 100")
 parser.add_argument("--randSeed",required=False,help="Random seed; either a number or a list of p numbers where p is the number of replicates specified by -p. Default: auto-select")
 parser.add_argument("--annotate",required=False,help="Annotation option. Select one of these options: 1: Annotate divergent times; 2: Annotate divergent times and expected mutation rates; 3: Annotate divergent times, expected mutation rates, and the full posterior distribution of the mutation rate. Default: 2")
@@ -59,6 +61,10 @@ parser.add_argument("--threads", "--cores", type=positive_int, metavar="N",
                     help="Maximum threads for MOSEK and numerical libraries. Must be positive. Default: library defaults. Replicates remain sequential.")
 
 args = vars(parser.parse_args())
+if args["CI_samples"] is not None:
+    if args["CI"] is None:
+        parser.error("--CI-samples requires --CI")
+    args["CI"]["samples_file"] = args["CI_samples"]
 
 # Set limits before importing NumPy/SciPy or any solver libraries.
 if args["threads"] is not None:
