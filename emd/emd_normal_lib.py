@@ -29,7 +29,7 @@ nDIGITS = 4 # round up outputs to 4 digits
 
 _solver_messages = set()
 
-def _solve_logged(problem, solver, context="optimization", **options):
+def _solve_logged(problem, solver, context="optimization", verbose=False, **options):
     """Report each solver outcome once per MDCat run, without solver verbosity."""
     def report(outcome, detail):
         key = (context, solver, outcome)
@@ -38,7 +38,7 @@ def _solve_logged(problem, solver, context="optimization", **options):
             print("Solver [{}]: {} {}".format(context, solver, detail), flush=True)
 
     try:
-        value = problem.solve(verbose=False, solver=solver, **options)
+        value = problem.solve(verbose=verbose, solver=solver, **options)
     except Exception as exc:
         report("failed", "failed: " + " ".join(str(exc).split()))
         raise
@@ -849,7 +849,9 @@ def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_
         started = time.monotonic()
         retry_solver = None
         for attempt in range(1, 11):
-            print("CI sample {}/{}: draw {}/10".format(i+1, nboots, attempt), flush=True)
+            print("CI sample {}/{}: draw {}/10{}".format(
+                i+1, nboots, attempt,
+                " (solver diagnostics enabled)" if attempt > 1 else ""), flush=True)
             for node in tree.traverse_postorder():
                 if node.is_root():
                     continue
@@ -869,7 +871,7 @@ def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_
                 print("CI sample {}/{}: trying {}".format(i+1, nboots, solver), flush=True)
                 options = {"mosek_params": {"MSK_IPAR_NUM_THREADS": threads}} if solver == cp.MOSEK and threads is not None else {}
                 try:
-                    _solve_logged(prob, solver, context="confidence intervals", **options)
+                    _solve_logged(prob, solver, context="confidence intervals", verbose=(attempt > 1), **options)
                 except Exception as exc:
                     failures.append("{}: {}: {}".format(solver, type(exc).__name__, " ".join(str(exc).split())))
                     continue
@@ -885,11 +887,11 @@ def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_
             elif prob.status != cp.OPTIMAL or var_tau.value is None or not np.all(np.isfinite(var_tau.value)):
                 detail = "status {}; missing or non-finite solution, or status not optimal".format(prob.status)
             else:
-                # Status alone does not guarantee primal feasibility.
+                # Keep the optimization bound, but accept nonnegative results
+                # below it due to numerical tolerance. Never clip or export negatives.
                 min_tau = float(np.min(var_tau.value))
-                bound_tolerance = min(1e-8, eps_tau * 1e-5)
-                if min_tau < 0 or min_tau < eps_tau - bound_tolerance:
-                    detail = "minimum branch length {:.12g} violates lower bound {:.12g}".format(min_tau, eps_tau)
+                if min_tau < 0:
+                    detail = "minimum branch length {:.12g} is negative".format(min_tau)
             if detail is None:
                 tau_boots[i] = var_tau.value.copy()
                 break

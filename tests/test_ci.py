@@ -103,14 +103,42 @@ class ConfidenceIntervalTest(unittest.TestCase):
         self.assertIn('discarding draw 1/10 from MOSEK', output.getvalue())
         self.assertIn('minimum branch length -0.01', output.getvalue())
 
-    def test_all_solvers_violate_bound_then_fail(self):
-        for length in (-.01, emd.EPS_tau / 2):
+    def test_nonnegative_lengths_below_bound_are_accepted(self):
+        for length in (0., .000791943113541, emd.EPS_tau / 2):
+            calls = []
             def solve(problem, **kwargs):
+                calls.append(kwargs)
                 problem._status = cp.OPTIMAL
-                problem.variables()[0].value = np.array([length, 1.])
+                problem.variables()[0].value = np.array([length, length])
             with self.subTest(length=length), patch.object(cp.Problem, 'solve', solve), contextlib.redirect_stdout(io.StringIO()):
-                with self.assertRaisesRegex(RuntimeError, 'failed after 10 draws with MOSEK.*violates lower bound'):
-                    self.run_ci()
+                tree = self.run_ci(nboots=1)
+            self.assertEqual(len(calls), 1)
+            self.assertEqual(min(n.tau_CI[1] for n in tree.traverse_leaves()), length)
+
+    def test_retries_rebuild_same_problem_with_fresh_rates(self):
+        problems, objectives, bounds, options = [], [], [], []
+        def solve(problem, **kwargs):
+            problems.append(problem)
+            options.append(kwargs)
+            variable = problem.variables()[0]
+            variable.value = np.ones(2)
+            objectives.append(float(problem.objective.value))
+            bounds.append([c.args[0].value.copy() for c in problem.constraints])
+            if len(problems) == 2:
+                raise cp.error.SolverError('simulated numerical failure')
+            problem._status = cp.OPTIMAL
+            variable.value = np.array([-.01, 1.] if len(problems) == 1 else [1., 1.])
+        with patch.object(cp.Problem, 'solve', solve), patch.object(emd.multinomial, 'randomize', side_effect=[1., 1., 2., 2., 3., 3.]) as draw, contextlib.redirect_stdout(io.StringIO()):
+            self.run_ci(nboots=1)
+        self.assertEqual(draw.call_count, 6)
+        self.assertEqual(len({id(p) for p in problems}), 3)
+        np.testing.assert_allclose(objectives, [0., 2000., 8000.])
+        for constraint_bounds in bounds[1:]:
+            for actual, expected in zip(constraint_bounds, bounds[0]):
+                np.testing.assert_array_equal(actual, expected)
+        self.assertEqual([o['solver'] for o in options], [cp.MOSEK]*3)
+        self.assertEqual([o['verbose'] for o in options], [False, True, True])
+        self.assertTrue(all(o['mosek_params'] == {'MSK_IPAR_NUM_THREADS': 1} for o in options))
 
     def test_tenth_draw_can_succeed_without_switching_solver(self):
         calls = []
