@@ -1,5 +1,6 @@
 include LICENSE README.md DEVELOPMENT.md pyproject.toml
 include CHANGELOG.md
+include md_cat_sample.py
 recursive-include emd *.py
 recursive-include simulator *.py
 global-exclude *.pyc *.lic
