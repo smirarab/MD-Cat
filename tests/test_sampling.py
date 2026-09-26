@@ -63,6 +63,7 @@ class SamplingTest(unittest.TestCase):
     def test_defaults_and_dry_run(self):
         plan=self.prepare()
         self.assertEqual(plan['options']['seqLen'],1234)
+        self.assertEqual(plan['options']['threads'],1)
         self.assertEqual(plan['options']['strategy'],'bottom-up')
         self.assertEqual(plan['options']['distribution'],'exponential')
         self.assertEqual(len(plan['jobs']),2)
@@ -77,6 +78,31 @@ class SamplingTest(unittest.TestCase):
         changed=self.cli('--workdir',self.work,'--resume','-p','2',ok=False)
         self.assertIn('conflicts',changed.stderr)
         self.assertIn('conflicts',self.cli('--workdir',self.work,'--resume','-S3',ok=False).stderr)
+
+    def test_config_seed_and_threads(self):
+        self.config.write_text(self.config.read_text()+'seed = 0\nnthreads = 3\n')
+        self.cli('-i',self.tree,'-t',self.config,'-o',self.output,
+                 '--workdir',self.work,'-S','2','--dry-run')
+        plan=json.loads((self.work/'manifest.json').read_text())
+        self.assertEqual(plan['options']['randSeed'],0)
+        self.assertEqual(plan['options']['threads'],3)
+        command=plan['jobs'][0]['command']
+        self.assertEqual(command[command.index('--threads')+1],'3')
+
+    def test_cli_overrides_config_seed_and_threads(self):
+        self.config.write_text(self.config.read_text()+'seed = 7\nnthreads = 3\n')
+        plan=self.prepare('--cores','2')
+        self.assertEqual(plan['options']['randSeed'],42)
+        self.assertEqual(plan['options']['threads'],2)
+
+    def test_invalid_config_seed_and_threads(self):
+        original=self.config.read_text()
+        for directive in ('seed = -1', 'nthreads = 0'):
+            self.config.write_text(original+directive+'\n')
+            result=self.cli('-i',self.tree,'-t',self.config,'-o',self.output,
+                            '--workdir',self.work,'--dry-run',ok=False)
+            self.assertIn('error:',result.stderr)
+            self.assertFalse(self.work.exists())
 
     def test_external_partial_resume_and_ci(self):
         plan=self.prepare('--CI','2 0.025 0.975')

@@ -24,6 +24,10 @@ bounds are required; equal bounds specify an exact age. The input tree is
 explicitly selected with `-i`, not the config's `treefile`. `numsites` supplies
 MD-CAT's sequence length (`-l`); an explicit `-l` overrides it. If neither is
 provided, the default is 1000. The selected value is printed and saved.
+Config `seed` supplies the master random seed and `nthreads` supplies numerical
+threads per dating job. Explicit `--randSeed` and `--threads` (or `--cores`)
+override them. Without either source, the seed is generated and saved, and
+threads default to 1. `nthreads` does not change `--jobs`.
 TreePL's optimization settings, smoothing parameter, and output path are not
 used.
 
@@ -173,5 +177,4 @@ one per line in sampling order. Each tree preserves the topology and labels,
 with branch lengths equal to that replicate's estimated durations. Node comments
 record `t` (divergence time) and, for non-root nodes, `mu` (the drawn mutation
 rate). The samples file is overwritten if it already exists. 
-
 

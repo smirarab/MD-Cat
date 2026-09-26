@@ -16,7 +16,7 @@ import time
 
 from emd import PROGRAM_VERSION
 from emd import PROGRAM_NAME, PROGRAM_VERSION
-from emd.cli import add_dating_options, positive_int, thread_limits
+from emd.cli import add_dating_options, positive_int, seed_int, thread_limits
 
 
 def digest(path):
@@ -81,9 +81,6 @@ def parser():
 
 
 def create_plan(args):
-    # Import only after setting the numerical library thread limits.
-    import numpy as np
-    import treeswift
     from emd.calibration import convert, sample_to_folder
     if not args.input or not args.samplingTime:
         raise ValueError('new analyses require -i TREE and -t TREEPL_CONFIG')
@@ -97,6 +94,14 @@ def create_plan(args):
     if any(Path(str(output)+suffix).exists() for suffix in ('', '.tsv', '.json')):
         raise ValueError(f'output already exists: {output}')
     _, metadata = convert(config.read_text())
+    if args.randSeed is None and 'seed' in metadata:
+        args.randSeed = seed_int(metadata['seed'])
+    if args.threads is None:
+        args.threads = positive_int(metadata.get('nthreads', '1'))
+    thread_limits(args.threads)
+    # Import only after resolving config defaults and setting thread limits.
+    import numpy as np
+    import treeswift
     length = args.seqLen
     if length is None:
         length = positive_int(metadata['numsites']) if 'numsites' in metadata else 1000
@@ -332,7 +337,6 @@ def main(argv=None):
                         raise ValueError(f'{key} contents conflict with the saved input snapshot')
             thread_limits(plan['options']['threads'])
         else:
-            thread_limits(args.threads)
             plan = create_plan(args)
         workdir = Path(plan['workdir'])
         if args.run_job is not None:

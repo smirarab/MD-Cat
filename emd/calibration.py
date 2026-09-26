@@ -17,11 +17,11 @@ def convert(text, single_bound="error"):
             continue
         key, sep, value = line.partition("=")
         key = key.strip().lower()
-        if key not in {"mrca", "min", "max", "treefile", "numsites"}:
+        if key not in {"mrca", "min", "max", "treefile", "numsites", "seed", "nthreads"}:
             continue
         if not sep or not value.strip():
             raise ValueError(f"line {lineno}: missing value for {key}")
-        if key in ("treefile", "numsites"):
+        if key in ("treefile", "numsites", "seed", "nthreads"):
             if key in metadata:
                 raise ValueError(f"line {lineno}: duplicate {key}")
             metadata[key] = value.strip()
