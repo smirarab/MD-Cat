@@ -121,21 +121,21 @@ def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=
             best_phi = phi
             best_omega = omega
             best_Q = Q
+            best_constr = constr
         #except mosek.Error:
         #    raise Exception("Mosek license not found!")
         #except:
         #    print("Failed to optimize using this init point!")        
-    # place confidence intervals
-    if CI_options is not None:    
-        b,M,dt = constr['b'],constr['M'],constr['dt']
-        get_confidence_interval(best_tree,smpl_times,best_tau,best_omega,best_Q,np.array(b),s,M,dt,CI_options,eps_tau=eps_tau,threads=threads,bw_time=bw_time,as_date=as_date)
-        convert_to_time(best_tree,best_tau,best_omega,best_phi,best_Q)
-        compute_divergence_time(best_tree,smpl_times)
-        annotate_divergence_time(best_tree,place_mu=place_mu,place_q=place_q,as_date=as_date,bw_time=bw_time)
-        for node in best_tree.traverse_preorder():
-            if not node.is_root():
-                _,tau_lower,_,tau_upper = node.tau_CI
-                node.edge_length = str(node.edge_length) + "[" + str(tau_lower) + "," + str(tau_upper) + "]"
+    if CI_options is not None:
+        from emd.ci_checkpoint import save, finish
+        b, M, dt = best_constr['b'], best_constr['M'], best_constr['dt']
+        if CI_options.get('checkpoint_file'):
+            save(CI_options['checkpoint_file'], best_tree, smpl_times, best_tau,
+                 best_omega, best_phi, best_Q, best_llh, b, M, dt, s,
+                 CI_options, eps_tau, bw_time, as_date, place_mu, place_q)
+        return finish(best_tree, smpl_times, best_tau, best_omega, best_phi,
+                      best_Q, best_llh, b, M, dt, s, CI_options, eps_tau,
+                      bw_time, as_date, place_mu, place_q, threads)
     return best_tree,best_llh,best_phi,best_omega        
 
 def EM_date(tree,smpl_times,init_rate_distr,refTree=None,s=1000,df=5e-4,maxIter=100,eps_tau=EPS_tau,fixed_tau=False,verbose=False,mu_avg=None,fixed_omega=False,pseudo=0,init_Q=None,threads=None):

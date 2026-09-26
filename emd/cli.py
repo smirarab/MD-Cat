@@ -62,7 +62,7 @@ def thread_limits(threads):
 
 def add_dating_options(parser, sampled=False):
     parser.add_argument('--version', action='version', version=f'{PROGRAM_NAME} {PROGRAM_VERSION}')
-    parser.add_argument('-i', '--input', required=not sampled, help='Input Newick tree (required for new analyses)' if sampled else 'Input Newick tree (required)')
+    parser.add_argument('-i', '--input', required=False, help='Input Newick tree (required for new analyses)' if sampled else 'Input Newick tree (required)')
     parser.add_argument('-t', '--samplingTime', help='treePL calibration config (required for new analyses)' if sampled else 'Sampling times / fixed calibrations (default: none)')
     parser.add_argument('-o', '--output', help='Final summary tree (default: INPUT.sampled.nex)' if sampled else 'Dated output tree (default: INPUT.mdcatTree)')
     parser.add_argument('-k', '--ncat', type=positive_int, default=50, help='Rate categories (default: 50)')
@@ -84,7 +84,8 @@ def add_dating_options(parser, sampled=False):
         parser.add_argument('-b', '--backward', action='store_true', help='Backward ages and contemporaneous tips')
         parser.add_argument('-d', '--asDate', action='store_true')
         parser.add_argument('--CI-samples', metavar='FILE', help='Write every CI replicate; requires --CI')
-        parser.add_argument('--ci-seed', type=seed_int, help=argparse.SUPPRESS)
+        parser.add_argument('--ci-seed', type=seed_int, help='CI random seed (also usable with --resume-ci)')
+        parser.add_argument('--resume-ci', metavar='FILE', help='Resume only CI from a saved .ci-checkpoint.json; skips optimization')
 
 
 def execute(args):
@@ -94,6 +95,16 @@ def execute(args):
     from treeswift import read_tree_newick
     from emd.util import date_to_years
     start = time.time()
+    if args.get('resume_ci'):
+        from emd.ci_checkpoint import resume, atomic_text
+        result = resume(args['resume_ci'], options=args['CI'],
+                        samples_file=args['CI_samples'], ci_seed=args['ci_seed'],
+                        threads=args['threads'])
+        output = args['output'] or (args['resume_ci'] + '.resumed.tre')
+        atomic_text(output, result[0].newick() + '\n')
+        print('Best log-likelihood:', result[1])
+        print('Runtime:', time.time()-start)
+        return
     as_date = args['asDate']
     bw = args['backward'] and not as_date
     def age(value):
@@ -112,6 +123,10 @@ def execute(args):
     if isinstance(tree, list):
         raise ValueError('expected one input tree')
     print('MD-Cat was called as follows: ' + ' '.join(sys.argv), flush=True)
+    output = args['output'] or (args['input'] + '.mdcatTree')
+    if args['CI'] is not None:
+        args['CI']['checkpoint_file'] = output + '.ci-checkpoint.json'
+        args['CI']['fitted_file'] = output + '.pre-ci.tre'
     result = MDCat(tree, args['ncat'], sampling_time=args['samplingTime'],
                    s=args['seqLen'] or 1000, nrep=args['rep'], maxIter=args['maxIter'],
                    verbose=args['verbose'], randseed=randseed, pseudo=1,
@@ -130,11 +145,13 @@ def main(argv=None):
     # Retain a module-level args mapping for existing embedding/instrumentation.
     global args
     args = vars(parser.parse_args(argv))
-    if args['CI_samples'] is not None:
+    if not args['input'] and not args['resume_ci']:
+        parser.error('--input is required unless --resume-ci is used')
+    if args['CI_samples'] is not None and not args['resume_ci']:
         if args['CI'] is None:
             parser.error('--CI-samples requires --CI')
         args['CI']['samples_file'] = args['CI_samples']
-    if args['ci_seed'] is not None:
+    if args['ci_seed'] is not None and not args['resume_ci']:
         if args['CI'] is None:
             parser.error('--ci-seed requires --CI')
         args['CI']['seed'] = args['ci_seed']

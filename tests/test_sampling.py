@@ -45,6 +45,21 @@ class SamplingTest(unittest.TestCase):
                  '--min-branch','.02','--dry-run',*extra)
         return json.loads((self.work/'manifest.json').read_text())
 
+    def test_job_reuses_ci_checkpoint(self):
+        from emd.sample import run_job
+        plan = self.prepare('--CI', '2 0 1')
+        job = plan['jobs'][0]
+        run_job(plan, job)
+        run = Path(job['run'])
+        self.assertTrue((run/'fitted.tre.pre-ci.tre').exists())
+        self.assertTrue((run/'fitted.tre.ci-checkpoint.json').exists())
+        (run/'ci-replicates.tre').unlink()
+        run_job(plan, job)
+        log = (run/'stdout.log').read_text()
+        self.assertIn('optimization skipped', log)
+        self.assertNotIn('Solving EM with init point', log)
+        self.assertEqual(len((run/'ci-replicates.tre').read_text().splitlines()), 2)
+
     def test_defaults_and_dry_run(self):
         plan=self.prepare()
         self.assertEqual(plan['options']['seqLen'],1234)

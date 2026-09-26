@@ -242,7 +242,11 @@ def run_job(plan, job):
         atomic_json(run/'status.json', dict(status='running', fingerprint=job['fingerprint']))
         try:
             with (run/'stdout.log').open('w') as out, (run/'stderr.log').open('w') as err:
-                result = subprocess.run(job['command'], stdout=out, stderr=err, check=False)
+                command = list(job['command'])
+                checkpoint = run/'fitted.tre.ci-checkpoint.json'
+                if plan['options']['CI'] and checkpoint.is_file():
+                    command += ['--resume-ci', str(checkpoint)]
+                result = subprocess.run(command, stdout=out, stderr=err, check=False)
             if result.returncode:
                 raise RuntimeError(f'dating process exited {result.returncode}; see {run}/stderr.log')
             outputs = validate_job(plan, job)

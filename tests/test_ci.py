@@ -164,6 +164,39 @@ class ConfidenceIntervalTest(unittest.TestCase):
         self.assertEqual(calls, [cp.MOSEK]*10)
         self.assertEqual(draw.call_count, 20)
 
+    def test_checkpoint_survives_ci_failure_and_resumes_without_em(self):
+        from emd.ci_checkpoint import resume
+        original = cp.Problem.solve
+        def solve(problem, **kwargs):
+            return original(problem, solver=cp.OSQP, verbose=False)
+        with tempfile.TemporaryDirectory() as directory:
+            checkpoint = Path(directory) / 'fit.ci-checkpoint.json'
+            fitted = Path(directory) / 'fit.pre-ci.tre'
+            samples = Path(directory) / 'samples.nwk'
+            options = dict(nboots=3, p_lower=0., p_upper=1., seed=123,
+                           checkpoint_file=str(checkpoint), fitted_file=str(fitted),
+                           samples_file=str(samples))
+            with patch.object(cp.Problem, 'solve', solve), contextlib.redirect_stdout(io.StringIO()):
+                with patch.object(emd, 'get_confidence_interval', side_effect=RuntimeError('CI failed')):
+                    with self.assertRaisesRegex(RuntimeError, 'CI failed'):
+                        emd.MDCat(read_tree_newick('(A:.1,B:.2);'), 3, nrep=1,
+                                  maxIter=2, randseed=42, CI_options=options)
+                self.assertTrue(checkpoint.is_file())
+                self.assertTrue(fitted.is_file())
+                self.assertFalse(samples.exists())
+                read_tree_newick(fitted.read_text())
+                before = checkpoint.read_bytes()
+                with patch.object(emd, 'EM_date', side_effect=AssertionError('EM must not run')):
+                    first = resume(checkpoint)[0].newick()
+                    first_samples = samples.read_text()
+                    second = resume(checkpoint)[0].newick()
+                    self.assertEqual(first, second)
+                    self.assertEqual(first_samples, samples.read_text())
+                    self.assertEqual(len(first_samples.splitlines()), 3)
+                    resume(checkpoint, options=dict(nboots=2, p_lower=.025, p_upper=.975), ci_seed=456)
+                    self.assertEqual(len(samples.read_text().splitlines()), 2)
+                self.assertEqual(before, checkpoint.read_bytes())
+
     def test_all_solvers_fail_once_then_raise(self):
         with patch.object(cp.Problem, 'solve', side_effect=cp.error.SolverError('unavailable')) as solve, contextlib.redirect_stdout(io.StringIO()):
             with self.assertRaisesRegex(RuntimeError, 'CI sample 1/2 failed with every solver'):
