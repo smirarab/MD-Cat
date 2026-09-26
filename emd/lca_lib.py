@@ -70,20 +70,21 @@ def find_LCAs(myTree,myQueries):
                 return left
             return left if H[left] < H[right] else right        
 
+        if not q:
+            raise ValueError("calibration query must contain at least one node name")
+        missing = [a for a in q if a not in F]
+        if missing:
+            raise ValueError(
+                "calibration query " + "+".join(q)
+                + ": node name(s) not found in the input tree: "
+                + ", ".join(missing))
+
         L = None
         R = None
         for a in q:
-            if a in F:
-                L = min(F[a],L) if L is not None else F[a]
-                R = max(F[a],R) if R is not None else F[a]
-            else:
-                logger.warning("ignored calibration for taxon " + a + " which is not found in the input tree")
-        try:
-            lca = __query__(1,0,len(E)-1,L,R)
-        except:
-            logger.warning("failed to find lca for " + str(q))
-            lca = None    
-        return lca    
+            L = min(F[a],L) if L is not None else F[a]
+            R = max(F[a],R) if R is not None else F[a]
+        return __query__(1,0,len(E)-1,L,R)
 
     E,F,H = euler_tour()
     t = min_segment_tree(E,H)
@@ -92,4 +93,3 @@ def find_LCAs(myTree,myQueries):
         lca = query_segment_tree(t,q,E,F,H)
         myLCAs.append(lca)
     return myLCAs    
-
