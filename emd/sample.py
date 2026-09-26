@@ -15,6 +15,7 @@ import tempfile
 import time
 
 from emd import PROGRAM_VERSION
+from emd import PROGRAM_NAME, PROGRAM_VERSION
 from emd.cli import add_dating_options, positive_int, thread_limits
 
 
@@ -301,6 +302,7 @@ def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     command_parser = parser()
     args = command_parser.parse_args(argv)
+    print(f'{PROGRAM_NAME} {PROGRAM_VERSION}', flush=True)
     # Ask argparse which options were supplied, including compact forms such
     # as -S2 and -p1, rather than trying to tokenize flags ourselves.
     explicit_parser = parser()

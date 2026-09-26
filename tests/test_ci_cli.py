@@ -38,6 +38,19 @@ class CIArgumentsTest(unittest.TestCase):
                 self.assertNotIn('Traceback', result.stderr)
                 self.assertEqual(result.stdout, '')
 
+    def test_version_without_input_or_numerical_imports(self):
+        result = subprocess.run([sys.executable, str(ROOT / 'md_cat.py'), '--version'],
+                                capture_output=True, text=True, timeout=10)
+        from emd import PROGRAM_VERSION
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'MD-Cat ' + PROGRAM_VERSION)
+
+    def test_startup_reports_version(self):
+        from emd import PROGRAM_VERSION
+        result = self.run_cli([])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[0], 'MD-Cat ' + PROGRAM_VERSION)
+
     def test_export_requires_ci(self):
         result = self.run_cli(['--CI-samples', 'samples.nwk'])
         self.assertEqual(result.returncode, 2)
@@ -47,7 +60,7 @@ class CIArgumentsTest(unittest.TestCase):
     def test_export_path_passed_to_ci(self):
         result = self.run_cli(['--CI', '100 0 1', '--CI-samples', 'samples.nwk'])
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout)['samples_file'], 'samples.nwk')
+        self.assertEqual(json.loads(result.stdout.splitlines()[-1])['samples_file'], 'samples.nwk')
 
     def test_valid_ci_and_default(self):
         for flags, expected in (([], None), (['--CI', '100 0.025 0.975'],
@@ -58,7 +71,7 @@ class CIArgumentsTest(unittest.TestCase):
             with self.subTest(flags=flags):
                 result = self.run_cli(flags)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(json.loads(result.stdout), expected)
+                self.assertEqual(json.loads(result.stdout.splitlines()[-1]), expected)
 
 
 if __name__ == '__main__':

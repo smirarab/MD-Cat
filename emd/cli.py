@@ -4,6 +4,7 @@ import math
 import os
 import sys
 import time
+from emd import PROGRAM_NAME, PROGRAM_VERSION
 
 THREAD_VARIABLES = ('OMP_NUM_THREADS', 'OPENBLAS_NUM_THREADS', 'MKL_NUM_THREADS',
                     'BLIS_NUM_THREADS', 'VECLIB_MAXIMUM_THREADS')
@@ -60,6 +61,7 @@ def thread_limits(threads):
 
 
 def add_dating_options(parser, sampled=False):
+    parser.add_argument('--version', action='version', version=f'{PROGRAM_NAME} {PROGRAM_VERSION}')
     parser.add_argument('-i', '--input', required=not sampled, help='Input Newick tree (required for new analyses)' if sampled else 'Input Newick tree (required)')
     parser.add_argument('-t', '--samplingTime', help='treePL calibration config (required for new analyses)' if sampled else 'Sampling times / fixed calibrations (default: none)')
     parser.add_argument('-o', '--output', help='Final summary tree (default: INPUT.sampled.nex)' if sampled else 'Dated output tree (default: INPUT.mdcatTree)')
@@ -87,6 +89,7 @@ def add_dating_options(parser, sampled=False):
 
 def execute(args):
     """Run with already-validated arguments and thread limits set before imports."""
+    print(f'{PROGRAM_NAME} {PROGRAM_VERSION}', flush=True)
     from emd.emd_normal_lib import MDCat
     from treeswift import read_tree_newick
     from emd.util import date_to_years

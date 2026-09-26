@@ -42,7 +42,7 @@ runpy.run_path("md_cat.py", run_name="__main__")
                 result = subprocess.run([sys.executable, "-c", probe] + flags,
                                         cwd=ROOT, env=env, capture_output=True,
                                         text=True, timeout=30, check=True)
-                self.assertEqual(json.loads(result.stdout),
+                self.assertEqual(json.loads(result.stdout.splitlines()[-1]),
                                  dict.fromkeys(VARIABLES, expected))
 
     def test_invalid_counts(self):
