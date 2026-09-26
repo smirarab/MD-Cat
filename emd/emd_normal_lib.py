@@ -861,7 +861,8 @@ def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_
             mu = mu_boots[i]
             bb = b_boots[i]
             var_tau = cp.Variable(N)
-            W = np.diag([sqrt(s/x) for x in bb])
+            # Omit unnecessary constant s (numerical issues). 
+            W = np.diag([sqrt(1/x) for x in bb])
             objective = cp.Minimize(cp.sum_squares(W @ (bb-np.diag(mu) @ var_tau)))
             constraints = [np.zeros(N)+eps_tau <= var_tau, csr_matrix(M)@var_tau == np.array(dt)]
             prob = cp.Problem(objective,constraints)

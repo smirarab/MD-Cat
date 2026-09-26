@@ -13,15 +13,29 @@ from emd import emd_normal_lib as emd
 
 
 class ConfidenceIntervalTest(unittest.TestCase):
-    def run_ci(self, nboots=2, lower=.025, upper=.975, samples_file=None, bw_time=False):
+    def run_ci(self, nboots=2, lower=.025, upper=.975, samples_file=None, bw_time=False, seq_len=1000):
         tree = read_tree_newick('(A:1,B:1);')
         for idx, node in enumerate(tree.traverse_postorder()):
             node.idx = idx
         emd.get_confidence_interval(
             tree, {'A': 1, 'B': 1}, [1, 1], [1.0], [[1], [1]],
-            np.array([1., 1.]), 1000, [[1, 0], [0, 1]], [1, 1],
+            np.array([1., 1.]), seq_len, [[1, 0], [0, 1]], [1, 1],
             {'nboots': nboots, 'p_lower': lower, 'p_upper': upper, 'samples_file': samples_file}, threads=1, bw_time=bw_time)
         return tree
+
+    def test_ci_objective_does_not_scale_with_sequence_length(self):
+        original = cp.Problem.solve
+        objectives = []
+        def solve(problem, **kwargs):
+            problem.variables()[0].value = np.array([2., 3.])
+            objectives.append(float(problem.objective.value))
+            return original(problem, solver=cp.OSQP, verbose=False)
+        with patch.object(cp.Problem, 'solve', solve), contextlib.redirect_stdout(io.StringIO()):
+            small = self.run_ci(nboots=1, seq_len=1)
+            large = self.run_ci(nboots=1, seq_len=162228)
+        np.testing.assert_allclose(objectives, [5., 5.])
+        for left, right in zip(small.traverse_leaves(), large.traverse_leaves()):
+            np.testing.assert_allclose(left.tau_CI, right.tau_CI)
 
     def test_missing_license_falls_back_without_redrawing(self):
         original = cp.Problem.solve
@@ -132,7 +146,7 @@ class ConfidenceIntervalTest(unittest.TestCase):
             self.run_ci(nboots=1)
         self.assertEqual(draw.call_count, 6)
         self.assertEqual(len({id(p) for p in problems}), 3)
-        np.testing.assert_allclose(objectives, [0., 2000., 8000.])
+        np.testing.assert_allclose(objectives, [0., 2., 8.])
         for constraint_bounds in bounds[1:]:
             for actual, expected in zip(constraint_bounds, bounds[0]):
                 np.testing.assert_array_equal(actual, expected)
