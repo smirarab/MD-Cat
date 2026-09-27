@@ -147,6 +147,8 @@ def create_plan(args):
                    '--maxIter', str(args.maxIter), '--randSeed', str(fit_seed),
                    '--threads', str(args.threads), '--min-branch', str(args.min_branch),
                    '--annotate', str(args.annotate)]
+        if args.solver_tolerances is not None:
+            command += ['--solver-tolerances'] + [str(x) for x in args.solver_tolerances]
         if args.verbose:
             command.append('-v')
         if args.CI:

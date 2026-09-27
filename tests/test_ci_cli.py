@@ -25,6 +25,14 @@ class CIArgumentsTest(unittest.TestCase):
         return subprocess.run([sys.executable, '-c', PROBE] + flags,
                               cwd=ROOT, capture_output=True, text=True, timeout=10)
 
+    def test_solver_tolerance_arguments(self):
+        for values in (['1e-7', '1e-7'], ['-1', '0', '0'], ['nan', '0', '0'],
+                       ['0', 'inf', '0'], ['bad', '0', '0']):
+            result = self.run_cli(['--solver-tolerances'] + values)
+            self.assertEqual(result.returncode, 2, result.stderr)
+        result = self.run_cli(['--solver-tolerances', '0', '1e-6', '0'])
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_invalid_ci_fails_before_imports(self):
         for value in ('100 1.0 0.0', '100 .5 .5', '100 0 0', '100 1 1', '100 -.1 .9', '100 .1 1.1',
                       '100 nan .9', '100 .1 inf', '0 .025 .975',

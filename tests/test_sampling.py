@@ -39,6 +39,15 @@ class SamplingTest(unittest.TestCase):
             self.assertNotEqual(result.returncode,0)
         return result
 
+    def test_custom_solver_tolerances_propagate_to_jobs(self):
+        self.prepare('--solver-tolerances', '2e-7', '3e-7', '4e-8')
+        plan = json.loads((self.work/'manifest.json').read_text())
+        self.assertEqual(plan['options']['solver_tolerances'], [2e-7, 3e-7, 4e-8])
+        for job in plan['jobs']:
+            command = job['command']
+            index = command.index('--solver-tolerances')
+            self.assertEqual(list(map(float, command[index+1:index+4])), [2e-7, 3e-7, 4e-8])
+
     def prepare(self, *extra):
         self.cli('-i',self.tree,'-t',self.config,'-o',self.output,'--workdir',self.work,
                  '-S','2','-p','1','-k','2','--maxIter','2','--randSeed','42',

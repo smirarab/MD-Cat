@@ -1,3 +1,17 @@
+# Algorithm and workflow details
+
+This guide describes calibration sampling, confidence-interval handling, and
+numerical solver acceptance. See the [README](README.md) for installation and
+basic usage.
+
+- [Calibration sampling](#sample-calibration-ranges-since-110)
+- [Sampling distributions and branch durations](#sampling-distributions-and-branch-durations)
+- [Replication counts and random seeds](#three-different-replication-counts)
+- [Execution and resume](#dry-run-external-execution-and-resume)
+- [Output formats](#output-formats)
+- [CI replicate exports](#export-ci-replicate-trees)
+- [Solver acceptance and CI recovery](#solver-acceptance-tolerances)
+
 ## Sample calibration ranges (since 1.1.0)
 
 `md_cat_sample.py` samples calibration ages from treePL bounds, dates the tree
@@ -176,5 +190,40 @@ After all CI samples succeed, `ci_samples.nwk` contains 100 Newick trees,
 one per line in sampling order. Each tree preserves the topology and labels,
 with branch lengths equal to that replicate's estimated durations. Node comments
 record `t` (divergence time) and, for non-root nodes, `mu` (the drawn mutation
-rate). The samples file is overwritten if it already exists. 
+rate). The samples file is overwritten if it already exists.
 
+## Solver acceptance tolerances
+
+MD-Cat logs solver outcomes and failures, including a missing MOSEK license,
+before trying alternatives; `-v` is not required. Fitting and CI try MOSEK,
+OSQP, CVXOPT, and ECOS in that order. Results must have optimal status, finite
+branch durations, and acceptable calibration residuals. An invalid result
+triggers fallback on the same optimization problem.
+
+
+Use one option to set the calibration absolute tolerance, calibration relative
+tolerance, and tiny-negative clipping tolerance, in that order:
+
+```bash
+md_cat.py -i input.nwk --solver-tolerances 1e-7 1e-7 1e-8
+```
+
+These are the defaults. All three values must be finite and nonnegative; zero
+is allowed. Calibration equations must satisfy
+`abs(M @ tau - dt) <= CALIB_ATOL + CALIB_RTOL * abs(dt)`.
+Absolute tolerances are in solver time coordinates, normally normalized by the
+calibration span. They do not change a solver's internal convergence settings.
+Nonnegative durations below `--min-branch` remain acceptable. Negative durations
+within `NEGATIVE_ATOL` may be clipped to zero only after all solvers have been
+tried, and only if calibration checks still pass after clipping.
+
+The option applies to fitting and CI, including `md_cat_sample.py` jobs. CI
+checkpoints preserve it; `--resume-ci` uses saved tolerances unless the option
+is supplied again. Older checkpoints use the defaults. Python callers can pass
+`solver_tolerances=(1e-7, 1e-7, 1e-8)` to `MDCat` or CI `resume`.
+
+If all solvers and clipping recovery fail for a CI draw, MD-Cat draws a
+replacement, up to ten total draws per requested sample. A warning reports
+`X/N` samples that needed replacement and the total replacement draws, noting
+that this may bias CI. Persistent failure stops CI; the fitted tree and
+pre-CI checkpoint remain available. Solver fallback alone does not redraw.

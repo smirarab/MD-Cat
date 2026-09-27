@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.1.10
+
+- Try alternative solvers and clipping recovery on the same CI draw first.
+  If all fail, redraw up to ten total attempts per sample, and warn how many
+  samples required replacement and that this may bias CI. Share numerical
+  acceptance checks between fitting and CI; persistent failures stop explicitly.
+- Allow tiny-negative clipping only after exhausting all solvers, with calibration
+  checks before and after clipping; do not reject nonnegative durations below the
+  optimization minimum.
+- Add `--solver-tolerances CALIB_ATOL CALIB_RTOL NEGATIVE_ATOL` (defaults:
+  `1e-7 1e-7 1e-8`). Save values in CI checkpoints and sampled-run manifests;
+  CI resume preserves saved values unless explicitly overridden.
+
 ## 1.1.9
 
 - Accept the final EM update and recompute its posterior probabilities before

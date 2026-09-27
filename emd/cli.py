@@ -40,6 +40,16 @@ def seed_int(value):
     return number
 
 
+def nonnegative_float(value):
+    try:
+        number = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError('must be a finite nonnegative number')
+    if not math.isfinite(number) or number < 0:
+        raise argparse.ArgumentTypeError('must be a finite nonnegative number')
+    return number
+
+
 def ci_options(value):
     tokens = value.split()
     if len(tokens) != 3:
@@ -76,6 +86,9 @@ def add_dating_options(parser, sampled=False):
     parser.add_argument('--annotate', type=int, choices=(0, 1, 2, 3), default=2, help='Per-run annotations: 0=none, 1=times, 2=times and rates, 3=also full rate probabilities (default: %(default)s)')
     parser.add_argument('--threads', '--cores', type=positive_int, default=None,
                         help='Numerical/solver threads per dating process (default: config nthreads, then 1)' if sampled else 'Numerical/solver threads (default: library defaults)')
+    parser.add_argument('--solver-tolerances', nargs=3, type=nonnegative_float,
+                        metavar=('CALIB_ATOL', 'CALIB_RTOL', 'NEGATIVE_ATOL'),
+                        help='Solver acceptance tolerances in normalized time units (defaults: 1e-7 1e-7 1e-8; CI resume uses saved values unless overridden)')
     parser.add_argument('--min-branch', type=positive_float, default=.001,
                         help='Minimum dated branch duration, in calibration units (default: 0.001)')
     if not sampled:
@@ -99,7 +112,7 @@ def execute(args):
         from emd.ci_checkpoint import resume, atomic_text
         result = resume(args['resume_ci'], options=args['CI'],
                         samples_file=args['CI_samples'], ci_seed=args['ci_seed'],
-                        threads=args['threads'])
+                        threads=args['threads'], solver_tolerances=args.get('solver_tolerances'))
         output = args['output'] or (args['resume_ci'] + '.resumed.tre')
         atomic_text(output, result[0].newick() + '\n')
         print('Best log-likelihood:', result[1])
@@ -133,7 +146,7 @@ def execute(args):
                    root_time=root, leaf_time=leaf, bw_time=bw, as_date=as_date,
                    place_mu=args['annotate'] >= 2, place_q=args['annotate'] >= 3,
                    annotate=args['annotate'] > 0,
-                   CI_options=args['CI'], threads=args['threads'], min_branch=args['min_branch'])
+                   CI_options=args['CI'], threads=args['threads'], min_branch=args['min_branch'], solver_tolerances=args.get('solver_tolerances'))
     output = args['output'] or (args['input'] + '.mdcatTree')
     result[0].write_tree_newick(output)
     print('Best log-likelihood:', result[1])

@@ -13,6 +13,7 @@ from random import seed,uniform, random, randrange
 from simulator.multinomial import *
 from scipy.stats import norm
 import time
+import sys
 from copy import deepcopy
 import cvxpy as cp
 from scipy.sparse import csr_matrix
@@ -44,10 +45,89 @@ def _solve_logged(problem, solver, context="optimization", verbose=False, **opti
         report("failed", "failed: " + " ".join(str(exc).split()))
         raise
     if problem.status == "optimal":
-        report("optimal", "is in use (status: optimal)")
+        report("optimal", "returned status: optimal")
     else:
         report(problem.status, "returned status: " + str(problem.status))
     return value
+
+# Acceptance tolerances in solver time coordinates (normalized by the
+# calibration span for MDCat and CI). These do not change solver settings.
+SOLVER_CALIB_ATOL = 1e-7
+SOLVER_CALIB_RTOL = 1e-7
+SOLVER_NEGATIVE_ATOL = 1e-8
+CI_MAX_DRAW_ATTEMPTS = 10
+
+
+class DurationSolveError(RuntimeError):
+    """All duration solvers failed numerical acceptance."""
+
+
+DURATION_SOLVERS = (cp.MOSEK, cp.OSQP, cp.CVXOPT, cp.ECOS)
+
+
+def validate_solver_tolerances(values=None):
+    values = (SOLVER_CALIB_ATOL, SOLVER_CALIB_RTOL, SOLVER_NEGATIVE_ATOL) if values is None else tuple(values)
+    if len(values) != 3 or any(not np.isfinite(x) or x < 0 for x in values):
+        raise ValueError("solver tolerances must be three finite nonnegative numbers")
+    return tuple(float(x) for x in values)
+
+
+def _calibration_error(values, M, dt, solver_tolerances=None):
+    atol, rtol, _ = validate_solver_tolerances(solver_tolerances)
+    target = np.asarray(dt, dtype=float)
+    if target.size == 0:
+        return None
+    residual = np.abs(csr_matrix(M) @ values - target)
+    allowed = atol + rtol * np.abs(target)
+    if np.any(residual > allowed):
+        return "calibration residual {:.12g} exceeds tolerance".format(float(np.max(residual)))
+    return None
+
+
+def _solve_durations(problem, variable, M, dt, solvers=DURATION_SOLVERS,
+                     threads=None, context="optimization", solver_tolerances=None):
+    """Try every solver on one problem; clip only as a final recovery step."""
+    solver_tolerances = validate_solver_tolerances(solver_tolerances)
+    failures = []
+    clipping_candidates = []
+    for solver in solvers:
+        options = {"mosek_params": {"MSK_IPAR_NUM_THREADS": threads}} if solver == cp.MOSEK and threads is not None else {}
+        # Do not allow a failed attempt to reuse a previous solver's values.
+        variable.value = None
+        try:
+            _solve_logged(problem, solver, context=context, **options)
+        except Exception as exc:
+            failures.append("{}: {}: {}".format(solver, type(exc).__name__, " ".join(str(exc).split())))
+            continue
+        detail = None
+        if problem.status != cp.OPTIMAL:
+            detail = "status {}".format(problem.status)
+        elif variable.value is None or not np.all(np.isfinite(variable.value)):
+            detail = "missing or non-finite solution"
+        else:
+            values = np.asarray(variable.value, dtype=float).copy()
+            detail = _calibration_error(values, M, dt, solver_tolerances)
+            if detail is None:
+                minimum = float(np.min(values))
+                if minimum >= 0:
+                    return values, solver
+                detail = "minimum branch length {:.12g} is negative".format(minimum)
+                if minimum >= -solver_tolerances[2]:
+                    clipped = np.maximum(values, 0.)
+                    clip_error = _calibration_error(clipped, M, dt, solver_tolerances)
+                    if clip_error is None:
+                        clipping_candidates.append((clipped, solver, minimum))
+                    else:
+                        detail += "; after clipping: " + clip_error
+        failures.append("{}: {}".format(solver, detail))
+    if clipping_candidates:
+        values, solver, minimum = clipping_candidates[0]
+        print("Solver [{}]: all solvers exhausted; using {} with tiny negative durations "
+              "clipped to zero (minimum {:.12g}); calibrations rechecked".format(
+                  context, solver, minimum), flush=True)
+        return values, solver
+    raise DurationSolveError("{} failed with every solver. {}".format(context, "; ".join(failures)))
+
 
 def initialize_rates(k,mu):
     omega = []
@@ -59,9 +139,10 @@ def initialize_rates(k,mu):
         phi.append(p)
     return multinomial(omega,phi)
 
-def MDCat(tree,k,sampling_time=None,bw_time=False,as_date=False,root_time=0,leaf_time=1,nrep=100,maxIter=100,randseed=None,pseudo=1,s=1000,verbose=False,place_mu=True,place_q=False,refTree=None,fixed_tau=False,fixed_omega=False,init_Q=None,CI_options=None,threads=None,min_branch=EPS_tau,annotate=True):
+def MDCat(tree,k,sampling_time=None,bw_time=False,as_date=False,root_time=0,leaf_time=1,nrep=100,maxIter=100,randseed=None,pseudo=1,s=1000,verbose=False,place_mu=True,place_q=False,refTree=None,fixed_tau=False,fixed_omega=False,init_Q=None,CI_options=None,threads=None,min_branch=EPS_tau,annotate=True,solver_tolerances=None):
     if not np.isfinite(min_branch) or min_branch <= 0:
         raise ValueError("min_branch must be finite and positive")
+    solver_tolerances = validate_solver_tolerances(solver_tolerances)
     _solver_messages.clear()
     smpl_times = setup_smpl_time(tree,sampling_time=sampling_time,bw_time=bw_time,as_date=as_date,root_time=root_time,leaf_time=leaf_time)   
     time_scale = TimeScale.from_sampling_times(smpl_times)
@@ -75,9 +156,9 @@ def MDCat(tree,k,sampling_time=None,bw_time=False,as_date=False,root_time=0,leaf
                 node.edge_length /= time_scale.span
     mu_avg = rtt_mu(tree,smpl_times)
     init_rate_distr = initialize_rates(k,mu_avg) 
-    return EM_date_random_init(tree,smpl_times,init_rate_distr,s=s,nrep=nrep,maxIter=maxIter,refTree=refTree,init_Q=init_Q,fixed_tau=fixed_tau,fixed_omega=fixed_omega,verbose=verbose,mu_avg=mu_avg,randseed=randseed,pseudo=pseudo,place_mu=place_mu,place_q=place_q,as_date=as_date,bw_time=bw_time,CI_options=CI_options,threads=threads,eps_tau=min_branch/time_scale.span,time_scale=time_scale,annotate=annotate)
+    return EM_date_random_init(tree,smpl_times,init_rate_distr,s=s,nrep=nrep,maxIter=maxIter,refTree=refTree,init_Q=init_Q,fixed_tau=fixed_tau,fixed_omega=fixed_omega,verbose=verbose,mu_avg=mu_avg,randseed=randseed,pseudo=pseudo,place_mu=place_mu,place_q=place_q,as_date=as_date,bw_time=bw_time,CI_options=CI_options,threads=threads,eps_tau=min_branch/time_scale.span,time_scale=time_scale,annotate=annotate,solver_tolerances=solver_tolerances)
 
-def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=100,refTree=None,init_Q=None,fixed_tau=False,verbose=False,mu_avg=None,fixed_omega=False,randseed=None,pseudo=0,place_mu=True,place_q=False,as_date=False,bw_time=False,CI_options=None,threads=None,eps_tau=EPS_tau,time_scale=None,annotate=True):
+def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=100,refTree=None,init_Q=None,fixed_tau=False,verbose=False,mu_avg=None,fixed_omega=False,randseed=None,pseudo=0,place_mu=True,place_q=False,as_date=False,bw_time=False,CI_options=None,threads=None,eps_tau=EPS_tau,time_scale=None,annotate=True,solver_tolerances=None):
     time_scale = time_scale or TimeScale()
     best_llh = -float("inf")
     best_tree = None
@@ -103,7 +184,7 @@ def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=
         print("Random seed: " + str(rseeds[r]))
         new_tree = read_tree_newick(tree.newick())
         #try:
-        ans,constr = EM_date(new_tree,smpl_times,init_rate_distr,s=s,maxIter=maxIter,refTree=refTree,init_Q=init_Q,fixed_tau=fixed_tau,verbose=verbose,mu_avg=mu_avg,fixed_omega=fixed_omega,pseudo=pseudo,threads=threads,eps_tau=eps_tau)
+        ans,constr = EM_date(new_tree,smpl_times,init_rate_distr,s=s,maxIter=maxIter,refTree=refTree,init_Q=init_Q,fixed_tau=fixed_tau,verbose=verbose,mu_avg=mu_avg,fixed_omega=fixed_omega,pseudo=pseudo,threads=threads,eps_tau=eps_tau,solver_tolerances=solver_tolerances)
         tau,omega,phi,llh,Q = ans['tau'],ans['omega'],ans['phi'],ans['llh'],ans['Q']
         convert_to_time(new_tree,tau,omega,phi,Q)
         new_ref = new_tree
@@ -112,7 +193,7 @@ def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=
         phi_adjusted = [p for p in phi if p > 1e-6]
         sum_phi = sum(phi_adjusted)
         phi_adjusted = [p/sum_phi for p in phi_adjusted]
-        ans,constr = EM_date(new_tree,smpl_times,s=s,init_rate_distr=multinomial(omega_adjusted,phi_adjusted),maxIter=maxIter,refTree=new_ref,init_Q=None,fixed_tau=fixed_tau,verbose=verbose,mu_avg=None,fixed_omega=fixed_omega,pseudo=pseudo,threads=threads,eps_tau=eps_tau)
+        ans,constr = EM_date(new_tree,smpl_times,s=s,init_rate_distr=multinomial(omega_adjusted,phi_adjusted),maxIter=maxIter,refTree=new_ref,init_Q=None,fixed_tau=fixed_tau,verbose=verbose,mu_avg=None,fixed_omega=fixed_omega,pseudo=pseudo,threads=threads,eps_tau=eps_tau,solver_tolerances=solver_tolerances)
         tau,omega,phi,llh,Q = ans['tau'],ans['omega'],ans['phi'],ans['llh'],ans['Q']
         #convert branch length to time unit and compute mu for each branch
         convert_to_time(new_tree,tau,omega,phi,Q)
@@ -153,17 +234,17 @@ def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=
             save(CI_options['checkpoint_file'], best_tree, smpl_times, best_tau,
                  best_omega, best_phi, best_Q, best_llh, b, M, dt, s,
                  CI_options, eps_tau, bw_time, as_date, place_mu, place_q,
-                 time_scale=time_scale, annotate=annotate)
+                 time_scale=time_scale, annotate=annotate, solver_tolerances=solver_tolerances)
         return finish(best_tree, smpl_times, best_tau, best_omega, best_phi,
                       best_Q, best_llh, b, M, dt, s, CI_options, eps_tau,
                       bw_time, as_date, place_mu, place_q, threads,
-                      time_scale=time_scale, annotate=annotate)
+                      time_scale=time_scale, annotate=annotate, solver_tolerances=solver_tolerances)
     if annotate:
         annotate_divergence_time(best_tree, place_mu=place_mu, place_q=place_q,
                                  as_date=as_date, bw_time=bw_time)
     return best_tree,best_llh,best_phi,best_omega
 
-def EM_date(tree,smpl_times,init_rate_distr,refTree=None,s=1000,df=5e-4,maxIter=100,eps_tau=EPS_tau,fixed_tau=False,verbose=False,mu_avg=None,fixed_omega=False,pseudo=0,init_Q=None,threads=None):
+def EM_date(tree,smpl_times,init_rate_distr,refTree=None,s=1000,df=5e-4,maxIter=100,eps_tau=EPS_tau,fixed_tau=False,verbose=False,mu_avg=None,fixed_omega=False,pseudo=0,init_Q=None,threads=None,solver_tolerances=None):
     M, dt, b = setup_constr(tree,smpl_times,s,eps_tau=eps_tau,pseudo=pseudo)
     Q, tau, phi, omega = init_EM(tree,b,init_rate_distr,s=s,refTree=refTree,init_Q=init_Q,eps_tau=eps_tau)
     if verbose:
@@ -178,7 +259,7 @@ def EM_date(tree,smpl_times,init_rate_distr,refTree=None,s=1000,df=5e-4,maxIter=
             print("EM iteration " + str(i))
         if verbose:
             print("Mstep ...")   
-        next_tau,next_omega = run_Mstep(tree,smpl_times,b,s,omega,tau,phi,Q,M,dt,eps_tau=eps_tau,fixed_tau=fixed_tau,fixed_omega=fixed_omega,mu_avg=mu_avg,threads=threads)
+        next_tau,next_omega = run_Mstep(tree,smpl_times,b,s,omega,tau,phi,Q,M,dt,eps_tau=eps_tau,fixed_tau=fixed_tau,fixed_omega=fixed_omega,mu_avg=mu_avg,threads=threads,solver_tolerances=solver_tolerances)
         llh = f_ll(b,s,next_tau,next_omega,phi,var_apprx=True)
         if verbose:
             print("Current llh: " + str(llh))
@@ -496,10 +577,10 @@ def run_Estep(b,s,omega,tau,phi,p_eps=EPS_tau,var_apprx=True):
         Q.append(q_i)
     return Q
 
-def run_Mstep(tree,smplTimes,b,s,omega,tau,phi,Q,M,dt,eps_tau=EPS_tau,fixed_tau=False,fixed_omega=False,mu_avg=None,threads=None):
+def run_Mstep(tree,smplTimes,b,s,omega,tau,phi,Q,M,dt,eps_tau=EPS_tau,fixed_tau=False,fixed_omega=False,mu_avg=None,threads=None,solver_tolerances=None):
     for i in range(100):
         #tau_star = compute_tau_star(tree,smplTimes,omega,Q,b,s,M,dt,eps_tau=eps_tau) if not fixed_tau else tau
-        tau_star = compute_tau_star_cvxpy(tau,omega,Q,b,s,M,dt,eps_tau=eps_tau,var_apprx=True,threads=threads) if not fixed_tau else tau
+        tau_star = compute_tau_star_cvxpy(tau,omega,Q,b,s,M,dt,eps_tau=eps_tau,var_apprx=True,threads=threads,solver_tolerances=solver_tolerances) if not fixed_tau else tau
         omega_star = compute_omega_star(tau_star,Q,b,phi,mu_avg=mu_avg) if not fixed_omega else omega
         if omega is not None and sqrt(sum([(x-y)**2 for (x,y) in zip(omega,omega_star)])/len(omega)) < 1e-5:
             break
@@ -795,7 +876,7 @@ def compute_f_MM(tau,omega,Q,b,s,var_apprx=True):
             F += s*Q[i][j]*(b[i]-omega[j]*tau[i])**2/w_ij + Q[i][j]*log(w_ij)       
     return F
 
-def compute_tau_star_cvxpy(tau,omega,Q,b,s,M,dt,eps_tau=EPS_tau,var_apprx=False,solvers=['mosek','osqp','cvxopt','ecos'],threads=None):
+def compute_tau_star_cvxpy(tau,omega,Q,b,s,M,dt,eps_tau=EPS_tau,var_apprx=False,solvers=['mosek','osqp','cvxopt','ecos'],threads=None,solver_tolerances=None):
     N = len(b)
     k = len(omega)
     Pd = np.zeros(N)
@@ -815,29 +896,14 @@ def compute_tau_star_cvxpy(tau,omega,Q,b,s,M,dt,eps_tau=EPS_tau,var_apprx=False,
     P = np.diag(Pd)        
     var_tau = cp.Variable(N)
     
-    try:
-        objective = cp.Minimize(cp.quad_form(var_tau,P) + q.T @ var_tau)
-    except:
-        print("Pd",Pd)
-        print("omega",omega)
-        #print("Q",Q)
-        return None    
-    upper_bound = np.array([float("inf") if b_i is not None else 1.0/6 for b_i in b])
+    objective = cp.Minimize(cp.quad_form(var_tau,P) + q.T @ var_tau)
     constraints = [np.zeros(N)+eps_tau <= var_tau, csr_matrix(M)@var_tau == np.array(dt)]
     prob = cp.Problem(objective,constraints)
-
     solver_map = {'mosek':cp.MOSEK,'osqp':cp.OSQP,'cvxopt':cp.CVXOPT,'ecos':cp.ECOS}
-    for solver in solvers:
-        try:    
-            options = {"mosek_params": {"MSK_IPAR_NUM_THREADS": threads}} if solver == 'mosek' and threads is not None else {}
-            f_star = _solve_logged(prob,solver_map[solver],**options)
-        except:
-            continue    
-        if prob.status == "optimal":
-            break
-    tau_star = var_tau.value
-
-    return tau_star
+    values, _ = _solve_durations(prob, var_tau, M, dt,
+                                 solvers=tuple(solver_map[name] for name in solvers),
+                                 threads=threads, solver_tolerances=solver_tolerances)
+    return values
 
 def compute_CI(a_list,p_lower=0.025,p_upper=0.975):
     s_list = sorted(a_list)
@@ -846,7 +912,7 @@ def compute_CI(a_list,p_lower=0.025,p_upper=0.975):
     idx_higher = ceil(p_upper*N)-1
     return s_list[idx_lower],s_list[idx_higher]
 
-def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_tau=EPS_tau,threads=None,bw_time=False,as_date=False,time_scale=None):
+def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_tau=EPS_tau,threads=None,bw_time=False,as_date=False,time_scale=None,solver_tolerances=None):
     time_scale = time_scale or TimeScale()
     smpl_times = time_scale.normalize_times(smpl_times)
     omega = [o * time_scale.span for o in omega]
@@ -880,13 +946,12 @@ def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_
 
     divTime_boots = [np.zeros(N+1) for i in range(nboots)]
     print("Confidence intervals: estimating {} samples".format(nboots), flush=True)
+    redrawn_samples = 0
+    replacement_draws = 0
     for i in range(nboots):
         started = time.monotonic()
-        retry_solver = None
-        for attempt in range(1, 11):
-            print("CI sample {}/{}: draw {}/10{}".format(
-                i+1, nboots, attempt,
-                " (solver diagnostics enabled)" if attempt > 1 else ""), flush=True)
+        # Exhaust every solver and clipping recovery before replacing a draw.
+        for attempt in range(1, CI_MAX_DRAW_ATTEMPTS + 1):
             for node in tree.traverse_postorder():
                 if node.is_root():
                     continue
@@ -896,46 +961,30 @@ def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_
             mu = mu_boots[i]
             bb = b_boots[i]
             var_tau = cp.Variable(N)
-            # Omit unnecessary constant s (numerical issues). 
+            # Omit unnecessary constant s (numerical issues).
             W = np.diag([sqrt(1/x) for x in bb])
             objective = cp.Minimize(cp.sum_squares(W @ (bb-np.diag(mu) @ var_tau)))
             constraints = [np.zeros(N)+eps_tau <= var_tau, csr_matrix(M)@var_tau == np.array(dt)]
             prob = cp.Problem(objective,constraints)
-            failures = []
-            solvers = (retry_solver,) if retry_solver is not None else (cp.MOSEK, cp.OSQP, cp.CVXOPT, cp.ECOS)
-            for solver in solvers:
-                print("CI sample {}/{}: trying {}".format(i+1, nboots, solver), flush=True)
-                options = {"mosek_params": {"MSK_IPAR_NUM_THREADS": threads}} if solver == cp.MOSEK and threads is not None else {}
-                try:
-                    _solve_logged(prob, solver, context="confidence intervals", verbose=(attempt > 1), **options)
-                except Exception as exc:
-                    failures.append("{}: {}: {}".format(solver, type(exc).__name__, " ".join(str(exc).split())))
-                    continue
-                retry_solver = solver
+            try:
+                tau_boots[i], solver = _solve_durations(
+                    prob, var_tau, M, dt, threads=threads,
+                    context="CI sample {}/{}".format(i+1, nboots), solver_tolerances=solver_tolerances)
                 break
-            else:
-                if retry_solver is None:
-                    raise RuntimeError("CI sample {}/{} failed with every solver. {}".format(
-                        i+1, nboots, "; ".join(failures)))
-            detail = None
-            if failures and prob.status is None:
-                detail = "; ".join(failures)
-            elif prob.status != cp.OPTIMAL or var_tau.value is None or not np.all(np.isfinite(var_tau.value)):
-                detail = "status {}; missing or non-finite solution, or status not optimal".format(prob.status)
-            else:
-                # Keep the optimization bound, but accept nonnegative results
-                # below it due to numerical tolerance. Never clip or export negatives.
-                min_tau = float(np.min(var_tau.value))
-                if min_tau < 0:
-                    detail = "minimum branch length {:.12g} is negative".format(min_tau)
-            if detail is None:
-                tau_boots[i] = var_tau.value.copy()
-                break
-            print("CI sample {}/{}: discarding draw {}/10 from {}: {}".format(
-                i+1, nboots, attempt, solver, detail), flush=True)
-        else:
-            raise RuntimeError("CI sample {}/{} failed after 10 draws with {}: {}".format(
-                i+1, nboots, retry_solver, detail))
+            except DurationSolveError as exc:
+                if attempt == CI_MAX_DRAW_ATTEMPTS:
+                    raise DurationSolveError(
+                        "CI sample {}/{} failed after {} draws; {}. "
+                        "{} / {} CI samples required replacement draws ({} replacements); "
+                        "no complete CI result was produced.".format(
+                            i+1, nboots, CI_MAX_DRAW_ATTEMPTS, exc,
+                            redrawn_samples, nboots, replacement_draws)) from exc
+                if attempt == 1:
+                    redrawn_samples += 1
+                replacement_draws += 1
+                print("WARNING: {}; redrawing this CI sample (draw {}/{}). "
+                      "Replacing failed draws may bias CI.".format(
+                          exc, attempt+1, CI_MAX_DRAW_ATTEMPTS), file=sys.stderr, flush=True)
         for node in tree.traverse_postorder():
             if not node.is_root():
                 node.edge_length = tau_boots[i][node.idx]
@@ -944,6 +993,11 @@ def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_
             divTime_boots[i][node.idx] = node.time
         print("CI sample {}/{}: completed with {} in {:.2f}s".format(
             i+1, nboots, solver, time.monotonic()-started), flush=True)
+
+    if redrawn_samples:
+        print("WARNING: {}/{} CI samples had to be redrawn due to optimization failure "
+              "({} replacement draws). This may bias CI.".format(
+                  redrawn_samples, nboots, replacement_draws), file=sys.stderr, flush=True)
 
     # All exported samples and intervals use the caller's original units.
     tau_boots = [values * time_scale.span for values in tau_boots]

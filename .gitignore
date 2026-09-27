@@ -13,6 +13,7 @@
 !/tests/test_internal_calibrations.py
 !/tests/test_annotations.py
 !/tests/test_em_consistency.py
+!/tests/test_solver_acceptance.py
 *.tre
 *temp*
 *.pyc

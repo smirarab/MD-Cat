@@ -13,13 +13,14 @@ from emd import emd_normal_lib as emd
 
 
 class ConfidenceIntervalTest(unittest.TestCase):
-    def run_ci(self, nboots=2, lower=.025, upper=.975, samples_file=None, bw_time=False, seq_len=1000):
+    def run_ci(self, nboots=2, lower=.025, upper=.975, samples_file=None, bw_time=False, seq_len=1000, target=1., rates=None):
+        rates = [1.] if rates is None else rates
         tree = read_tree_newick('(A:1,B:1);')
         for idx, node in enumerate(tree.traverse_postorder()):
             node.idx = idx
         emd.get_confidence_interval(
-            tree, {'A': 1, 'B': 1}, [1, 1], [1.0], [[1], [1]],
-            np.array([1., 1.]), seq_len, [[1, 0], [0, 1]], [1, 1],
+            tree, {'A': 1, 'B': 1}, [1, 1], rates, [[1/len(rates)]*len(rates)]*2,
+            np.array([1., 1.]), seq_len, [[1, 0], [0, 1]], [target, target],
             {'nboots': nboots, 'p_lower': lower, 'p_upper': upper, 'samples_file': samples_file}, threads=1, bw_time=bw_time)
         return tree
 
@@ -113,9 +114,8 @@ class ConfidenceIntervalTest(unittest.TestCase):
         output = io.StringIO()
         with patch.object(cp.Problem, 'solve', solve), contextlib.redirect_stdout(output):
             self.run_ci()
-        self.assertEqual(calls, [cp.MOSEK]*3)
-        self.assertIn('discarding draw 1/10 from MOSEK', output.getvalue())
-        self.assertIn('minimum branch length -0.01', output.getvalue())
+        self.assertEqual(calls, [cp.MOSEK, cp.OSQP, cp.MOSEK])
+        self.assertIn('completed with OSQP', output.getvalue())
 
     def test_nonnegative_lengths_below_bound_are_accepted(self):
         for length in (0., .000791943113541, emd.EPS_tau / 2):
@@ -125,11 +125,11 @@ class ConfidenceIntervalTest(unittest.TestCase):
                 problem._status = cp.OPTIMAL
                 problem.variables()[0].value = np.array([length, length])
             with self.subTest(length=length), patch.object(cp.Problem, 'solve', solve), contextlib.redirect_stdout(io.StringIO()):
-                tree = self.run_ci(nboots=1)
+                tree = self.run_ci(nboots=1, target=length)
             self.assertEqual(len(calls), 1)
             self.assertEqual(min(n.tau_CI[1] for n in tree.traverse_leaves()), length)
 
-    def test_retries_rebuild_same_problem_with_fresh_rates(self):
+    def test_fallback_preserves_problem_and_random_draw(self):
         problems, objectives, bounds, options = [], [], [], []
         def solve(problem, **kwargs):
             problems.append(problem)
@@ -144,39 +144,62 @@ class ConfidenceIntervalTest(unittest.TestCase):
             variable.value = np.array([-.01, 1.] if len(problems) == 1 else [1., 1.])
         with patch.object(cp.Problem, 'solve', solve), patch.object(emd.multinomial, 'randomize', side_effect=[1., 1., 2., 2., 3., 3.]) as draw, contextlib.redirect_stdout(io.StringIO()):
             self.run_ci(nboots=1)
-        self.assertEqual(draw.call_count, 6)
-        self.assertEqual(len({id(p) for p in problems}), 3)
-        np.testing.assert_allclose(objectives, [0., 2., 8.])
+        self.assertEqual(draw.call_count, 2)
+        self.assertEqual(len({id(p) for p in problems}), 1)
+        np.testing.assert_allclose(objectives, [0., 0., 0.])
         for constraint_bounds in bounds[1:]:
             for actual, expected in zip(constraint_bounds, bounds[0]):
                 np.testing.assert_array_equal(actual, expected)
-        self.assertEqual([o['solver'] for o in options], [cp.MOSEK]*3)
-        self.assertEqual([o['verbose'] for o in options], [False, True, True])
-        self.assertTrue(all(o['mosek_params'] == {'MSK_IPAR_NUM_THREADS': 1} for o in options))
+        self.assertEqual([o['solver'] for o in options], [cp.MOSEK, cp.OSQP, cp.CVXOPT])
+        self.assertEqual([o['verbose'] for o in options], [False, False, False])
+        self.assertEqual(options[0]['mosek_params'], {'MSK_IPAR_NUM_THREADS': 1})
+        self.assertTrue(all('mosek_params' not in o for o in options[1:]))
 
-    def test_tenth_draw_can_succeed_without_switching_solver(self):
-        calls = []
-        def solve(problem, **kwargs):
-            calls.append(kwargs['solver'])
-            problem._status = cp.OPTIMAL
-            problem.variables()[0].value = np.array(
-                [-.01, 1.] if len(calls) < 10 else [1., 1.])
-        with patch.object(cp.Problem, 'solve', solve), patch.object(emd.multinomial, 'randomize', return_value=1.) as draw, contextlib.redirect_stdout(io.StringIO()):
-            self.run_ci(nboots=1)
-        self.assertEqual(calls, [cp.MOSEK]*10)
-        self.assertEqual(draw.call_count, 20)
-
-    def test_ten_invalid_draws_stop(self):
+    def test_invalid_results_exhaust_solvers_on_each_draw(self):
         calls = []
         def solve(problem, **kwargs):
             calls.append(kwargs['solver'])
             problem._status = cp.OPTIMAL
             problem.variables()[0].value = np.array([-.01, 1.])
         with patch.object(cp.Problem, 'solve', solve), patch.object(emd.multinomial, 'randomize', return_value=1.) as draw, contextlib.redirect_stdout(io.StringIO()):
-            with self.assertRaisesRegex(RuntimeError, 'failed after 10 draws'):
+            with self.assertRaisesRegex(RuntimeError, 'failed with every solver'):
                 self.run_ci(nboots=1)
-        self.assertEqual(calls, [cp.MOSEK]*10)
-        self.assertEqual(draw.call_count, 20)
+        self.assertEqual(calls, list(emd.DURATION_SOLVERS)*emd.CI_MAX_DRAW_ATTEMPTS)
+        self.assertEqual(draw.call_count, 2*emd.CI_MAX_DRAW_ATTEMPTS)
+
+    def test_replacement_draws_report_samples_separately_from_attempts(self):
+        calls = []
+        def solve(problem, **kwargs):
+            calls.append(kwargs['solver'])
+            problem._status = cp.INFEASIBLE if len(calls) <= 8 else cp.OPTIMAL
+            problem.variables()[0].value = np.ones(2)
+        warning = io.StringIO()
+        with patch.object(cp.Problem, 'solve', solve), patch.object(emd.multinomial, 'randomize', return_value=1.) as draw, contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(warning):
+            self.run_ci(nboots=2)
+        self.assertEqual(calls, list(emd.DURATION_SOLVERS)*2 + [cp.MOSEK]*2)
+        self.assertEqual(draw.call_count, 8)
+        self.assertIn('1/2 CI samples had to be redrawn', warning.getvalue())
+        self.assertIn('(2 replacement draws)', warning.getvalue())
+        self.assertIn('This may bias CI', warning.getvalue())
+
+    def test_seeded_samples_and_rng_state_survive_invalid_solver_fallback(self):
+        import random
+        original = cp.Problem.solve
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()):
+            outputs = []
+            for fail_first in (False, True):
+                def solve(problem, **kwargs):
+                    if fail_first and kwargs['solver'] == cp.MOSEK:
+                        problem._status = cp.OPTIMAL_INACCURATE
+                        problem.variables()[0].value = np.ones(2)
+                        return 0.
+                    return original(problem, solver=cp.OSQP, verbose=False)
+                random.seed(42)
+                path = Path(directory)/str(fail_first)
+                with patch.object(cp.Problem, 'solve', solve):
+                    self.run_ci(nboots=5, samples_file=path, rates=[.5, 2.])
+                outputs.append((path.read_bytes(), random.getstate()))
+            self.assertEqual(outputs[0], outputs[1])
 
     def test_checkpoint_survives_ci_failure_and_resumes_without_em(self):
         from emd.ci_checkpoint import resume
@@ -211,11 +234,11 @@ class ConfidenceIntervalTest(unittest.TestCase):
                     self.assertEqual(len(samples.read_text().splitlines()), 2)
                 self.assertEqual(before, checkpoint.read_bytes())
 
-    def test_all_solvers_fail_once_then_raise(self):
+    def test_all_solvers_fail_until_draw_limit(self):
         with patch.object(cp.Problem, 'solve', side_effect=cp.error.SolverError('unavailable')) as solve, contextlib.redirect_stdout(io.StringIO()):
-            with self.assertRaisesRegex(RuntimeError, 'CI sample 1/2 failed with every solver'):
+            with self.assertRaisesRegex(RuntimeError, 'CI sample 1/2 failed after 10 draws'):
                 self.run_ci()
-        self.assertEqual(solve.call_count, 4)
+        self.assertEqual(solve.call_count, 4*emd.CI_MAX_DRAW_ATTEMPTS)
 
     def test_infeasible_status_is_not_accepted(self):
         def solve(problem, **kwargs):

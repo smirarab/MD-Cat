@@ -28,7 +28,7 @@ def atomic_text(path, text):
 
 
 def save(path, tree, smpl_times, tau, omega, phi, Q, llh, b, M, dt, s,
-         options, eps_tau, bw_time, as_date, place_mu, place_q, time_scale=None, annotate=True):
+         options, eps_tau, bw_time, as_date, place_mu, place_q, time_scale=None, annotate=True, solver_tolerances=None):
     import numpy as np
     from copy import deepcopy
     from emd.emd_normal_lib import annotate_divergence_time
@@ -41,7 +41,7 @@ def save(path, tree, smpl_times, tau, omega, phi, Q, llh, b, M, dt, s,
                  smpl_times=smpl_times, tau=tau, omega=omega, phi=phi, Q=Q,
                  llh=llh, b=b, M=M, dt=dt, s=s, options=options,
                  eps_tau=eps_tau, bw_time=bw_time, as_date=as_date,
-                 place_mu=place_mu, place_q=place_q, annotate=annotate, random_state=random.getstate())
+                 place_mu=place_mu, place_q=place_q, annotate=annotate, solver_tolerances=solver_tolerances, random_state=random.getstate())
     if time_scale is not None:
         # Existing schema-1 numerical fields remain in original units.
         state['time_scale'] = dict(origin=time_scale.origin, span=time_scale.span)
@@ -63,14 +63,14 @@ def save(path, tree, smpl_times, tau, omega, phi, Q, llh, b, M, dt, s,
 
 
 def finish(tree, smpl_times, tau, omega, phi, Q, llh, b, M, dt, s,
-           options, eps_tau, bw_time, as_date, place_mu, place_q, threads, time_scale=None, annotate=True):
+           options, eps_tau, bw_time, as_date, place_mu, place_q, threads, time_scale=None, annotate=True, solver_tolerances=None):
     import numpy as np
     from emd.emd_normal_lib import (get_confidence_interval, convert_to_time,
                                    compute_divergence_time, annotate_divergence_time)
     time_scale = time_scale or TimeScale()
     get_confidence_interval(tree, smpl_times, tau, omega, Q, np.array(b), s, M, dt,
                             options, eps_tau=eps_tau, threads=threads,
-                            bw_time=bw_time, as_date=as_date, time_scale=time_scale)
+                            bw_time=bw_time, as_date=as_date, time_scale=time_scale, solver_tolerances=solver_tolerances)
     # Reconstruct times in solver coordinates so consistency tolerances also
     # remain independent of the user's units and absolute time origin.
     convert_to_time(tree, np.asarray(tau)/time_scale.span, omega, phi, Q)
@@ -89,7 +89,7 @@ def finish(tree, smpl_times, tau, omega, phi, Q, llh, b, M, dt, s,
     return tree, llh, phi, omega
 
 
-def resume(path, options=None, samples_file=None, ci_seed=None, threads=None):
+def resume(path, options=None, samples_file=None, ci_seed=None, threads=None, solver_tolerances=None):
     from treeswift import read_tree_newick
     with open(path) as handle:
         state = json.load(handle)
@@ -117,4 +117,5 @@ def resume(path, options=None, samples_file=None, ci_seed=None, threads=None):
     time_scale = TimeScale(**state.get('time_scale', {}))
     return finish(tree, options=saved_options, threads=threads, time_scale=time_scale,
                   annotate=state.get("annotate", True),
+                  solver_tolerances=solver_tolerances if solver_tolerances is not None else state.get("solver_tolerances"),
                   **{key: state[key] for key in keys})

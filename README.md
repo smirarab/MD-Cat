@@ -246,7 +246,7 @@ md_cat_sample.py -i input.nwk -t calibrations.config -o summary.nex \
 * All sampled calibrations, fitted trees, and logs are retained in
   `summary.nex.runs/`. Use `--dry-run` to prepare jobs without executing them.
 
-See the [sampling guide](SAMLING.md) for input settings, output formats,
+See the [algorithm and workflow guide](ALGORITHMS.md#sample-calibration-ranges-since-110) for input settings, output formats,
 parallel execution, resume, and partial summaries.
 
 # Controlling CPU usage
@@ -263,11 +263,6 @@ library defaults and environment settings.
 
 # Other useful options
 
-MD-Cat logs the solver that successfully solves an optimization problem, and
-reports solver failures (such as a missing MOSEK license) before fallback.
-Each solver outcome is printed once per run, separately for optimization and
-confidence intervals; `-v` is not required.
-
 The following options are useful to explore:
 
 * `-v` can be used to turn on verbose mode.
@@ -281,3 +276,6 @@ The following options are useful to explore:
   `2` adds times and rates (default), and `3` also adds rate probabilities.
   Use `--annotate 0` to reproduce the unannotated output of older non-CI runs.
   With `--CI`, level `0` also omits interval annotations from the fitted tree.
+* `--solver-tolerances ATOL RTOL NEGATIVE_ATOL` sets solver acceptance tolerances
+  (defaults: `1e-7 1e-7 1e-8`). See [algorithm and workflow details](ALGORITHMS.md)
+  for solver recovery, CI retries, and calibration sampling.
