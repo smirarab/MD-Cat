@@ -54,6 +54,17 @@ To obtain a free academic license, visit MOSEK's website.
 
 MD-Cat accepts calibration points (hard constraints on divergence times) for internal nodes, sampling times at leaf nodes, and a mixture of the two. Below we give examples for some most common use-cases. All examples are given in the folder [use_cases](use_cases) of this repository.
 
+MD-Cat normalizes times internally by the span between the earliest and latest
+calibration times. Outputs remain in your original units, with rates measured
+per original time unit. If you change units (for example, millions of years to
+years), scale `--min-branch` by the same factor as your calibration times; its
+default is still 0.001 in the units you supply. Substitution branch lengths and
+sequence length do not change. Dating requires at least two distinct calibration
+times; the default root time 0 and tip time 1 provide this span when no
+calibrations are supplied. Normalization applies to both fitting and CIs and can
+change estimates from earlier versions that encountered unit-dependent rate
+floors or stopping thresholds.
+
 Notes:
 
 * The main installed command is  `md_cat.py`, which you can run directly

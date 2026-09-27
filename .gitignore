@@ -7,6 +7,8 @@
 !/tests/test_ci_cli.py
 !/tests/test_sampling.py
 !/tests/test_summary_package.py
+!/tests/test_lca.py
+!/tests/test_time_scale.py
 *.tre
 *temp*
 *.pyc

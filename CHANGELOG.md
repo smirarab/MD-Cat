@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.5
+
+- Normalize calibration times by their span before rate initialization and EM
+  fitting. Rate floors and convergence thresholds now use these normalized
+  coordinates, so changing calibration units does not change the normalized fit
+  when `--min-branch` is scaled with them.
+- Solve CIs in the same coordinates and restore original times, durations, and
+  rates in fitted trees, CI exports, and checkpoints. Preserve precision in time
+  and rate annotations instead of rounding small converted values to zero.
+- Save the time transform with new CI checkpoints; schema-1 checkpoints without
+  it continue to resume in their original coordinates. Sampled-run manifests
+  retain the exact-version check to prevent mixing old and new fits.
+- Reject nonfinite calibration times or a zero calibration-time span with a
+  clear error before optimization.
+
 ## 1.1.0
 
 - Add the installed `md_cat_sample.py` workflow for treePL calibration bounds,

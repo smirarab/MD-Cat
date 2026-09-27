@@ -6,6 +6,7 @@ import random
 import tempfile
 
 from emd import PROGRAM_VERSION
+from emd.time_scale import TimeScale
 
 
 def atomic_text(path, text):
@@ -27,7 +28,7 @@ def atomic_text(path, text):
 
 
 def save(path, tree, smpl_times, tau, omega, phi, Q, llh, b, M, dt, s,
-         options, eps_tau, bw_time, as_date, place_mu, place_q):
+         options, eps_tau, bw_time, as_date, place_mu, place_q, time_scale=None):
     import numpy as np
     from copy import deepcopy
     from emd.emd_normal_lib import annotate_divergence_time
@@ -41,6 +42,9 @@ def save(path, tree, smpl_times, tau, omega, phi, Q, llh, b, M, dt, s,
                  llh=llh, b=b, M=M, dt=dt, s=s, options=options,
                  eps_tau=eps_tau, bw_time=bw_time, as_date=as_date,
                  place_mu=place_mu, place_q=place_q, random_state=random.getstate())
+    if time_scale is not None:
+        # Existing schema-1 numerical fields remain in original units.
+        state['time_scale'] = dict(origin=time_scale.origin, span=time_scale.span)
     def numeric(value):
         if isinstance(value, np.ndarray):
             return value.tolist()
@@ -58,15 +62,21 @@ def save(path, tree, smpl_times, tau, omega, phi, Q, llh, b, M, dt, s,
 
 
 def finish(tree, smpl_times, tau, omega, phi, Q, llh, b, M, dt, s,
-           options, eps_tau, bw_time, as_date, place_mu, place_q, threads):
+           options, eps_tau, bw_time, as_date, place_mu, place_q, threads, time_scale=None):
     import numpy as np
     from emd.emd_normal_lib import (get_confidence_interval, convert_to_time,
                                    compute_divergence_time, annotate_divergence_time)
+    time_scale = time_scale or TimeScale()
     get_confidence_interval(tree, smpl_times, tau, omega, Q, np.array(b), s, M, dt,
                             options, eps_tau=eps_tau, threads=threads,
-                            bw_time=bw_time, as_date=as_date)
+                            bw_time=bw_time, as_date=as_date, time_scale=time_scale)
+    # Reconstruct times in solver coordinates so consistency tolerances also
+    # remain independent of the user's units and absolute time origin.
+    convert_to_time(tree, np.asarray(tau)/time_scale.span, omega, phi, Q)
+    compute_divergence_time(tree, time_scale.normalize_times(smpl_times))
     convert_to_time(tree, tau, omega, phi, Q)
-    compute_divergence_time(tree, smpl_times)
+    for node in tree.traverse_postorder():
+        node.time = time_scale.origin + node.time * time_scale.span
     annotate_divergence_time(tree, place_mu=place_mu, place_q=place_q,
                              as_date=as_date, bw_time=bw_time)
     for node in tree.traverse_preorder():
@@ -101,5 +111,6 @@ def resume(path, options=None, samples_file=None, ci_seed=None, threads=None):
     print(f'Resuming CI only from {path}; optimization skipped', flush=True)
     keys = ('smpl_times', 'tau', 'omega', 'phi', 'Q', 'llh', 'b', 'M', 'dt', 's',
             'eps_tau', 'bw_time', 'as_date', 'place_mu', 'place_q')
-    return finish(tree, options=saved_options, threads=threads,
+    time_scale = TimeScale(**state.get('time_scale', {}))
+    return finish(tree, options=saved_options, threads=threads, time_scale=time_scale,
                   **{key: state[key] for key in keys})

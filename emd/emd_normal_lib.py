@@ -8,6 +8,7 @@ from os import remove
 from emd.lca_lib import find_LCAs
 from emd.util import bitset_from_tree, bitset_index,date_to_years, years_to_date
 from emd.rtt_lib import rtt_mu 
+from emd.time_scale import TimeScale
 from random import seed,uniform, random, randrange
 from simulator.multinomial import *
 from scipy.stats import norm
@@ -63,11 +64,21 @@ def MDCat(tree,k,sampling_time=None,bw_time=False,as_date=False,root_time=0,leaf
         raise ValueError("min_branch must be finite and positive")
     _solver_messages.clear()
     smpl_times = setup_smpl_time(tree,sampling_time=sampling_time,bw_time=bw_time,as_date=as_date,root_time=root_time,leaf_time=leaf_time)   
+    time_scale = TimeScale.from_sampling_times(smpl_times)
+    smpl_times = time_scale.normalize_times(smpl_times)
+    # Substitution lengths and sequence length stay unchanged: omega*tau and
+    # the likelihood are invariant under this change of time coordinates.
+    if refTree is not None:
+        refTree = deepcopy(refTree)
+        for node in refTree.traverse_preorder():
+            if not node.is_root():
+                node.edge_length /= time_scale.span
     mu_avg = rtt_mu(tree,smpl_times)
     init_rate_distr = initialize_rates(k,mu_avg) 
-    return EM_date_random_init(tree,smpl_times,init_rate_distr,s=s,nrep=nrep,maxIter=maxIter,refTree=refTree,init_Q=init_Q,fixed_tau=fixed_tau,fixed_omega=fixed_omega,verbose=verbose,mu_avg=mu_avg,randseed=randseed,pseudo=pseudo,place_mu=place_mu,place_q=place_q,as_date=as_date,bw_time=bw_time,CI_options=CI_options,threads=threads,eps_tau=min_branch)
+    return EM_date_random_init(tree,smpl_times,init_rate_distr,s=s,nrep=nrep,maxIter=maxIter,refTree=refTree,init_Q=init_Q,fixed_tau=fixed_tau,fixed_omega=fixed_omega,verbose=verbose,mu_avg=mu_avg,randseed=randseed,pseudo=pseudo,place_mu=place_mu,place_q=place_q,as_date=as_date,bw_time=bw_time,CI_options=CI_options,threads=threads,eps_tau=min_branch/time_scale.span,time_scale=time_scale)
 
-def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=100,refTree=None,init_Q=None,fixed_tau=False,verbose=False,mu_avg=None,fixed_omega=False,randseed=None,pseudo=0,place_mu=True,place_q=False,as_date=False,bw_time=False,CI_options=None,threads=None,eps_tau=EPS_tau):
+def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=100,refTree=None,init_Q=None,fixed_tau=False,verbose=False,mu_avg=None,fixed_omega=False,randseed=None,pseudo=0,place_mu=True,place_q=False,as_date=False,bw_time=False,CI_options=None,threads=None,eps_tau=EPS_tau,time_scale=None):
+    time_scale = time_scale or TimeScale()
     best_llh = -float("inf")
     best_tree = None
     best_phi = None
@@ -126,16 +137,28 @@ def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=
         #    raise Exception("Mosek license not found!")
         #except:
         #    print("Failed to optimize using this init point!")        
+    # Return and checkpoint physical units, including the calibration origin.
+    # CI uses the saved transform to solve in the same normalized coordinates.
+    best_tau = np.asarray(best_tau) * time_scale.span
+    best_omega = [o / time_scale.span for o in best_omega]
+    smpl_times = time_scale.restore_times(smpl_times)
+    eps_tau *= time_scale.span
+    convert_to_time(best_tree,best_tau,best_omega,best_phi,best_Q)
+    for node in best_tree.traverse_postorder():
+        node.time = time_scale.origin + node.time * time_scale.span
     if CI_options is not None:
         from emd.ci_checkpoint import save, finish
         b, M, dt = best_constr['b'], best_constr['M'], best_constr['dt']
+        dt = np.asarray(dt) * time_scale.span
         if CI_options.get('checkpoint_file'):
             save(CI_options['checkpoint_file'], best_tree, smpl_times, best_tau,
                  best_omega, best_phi, best_Q, best_llh, b, M, dt, s,
-                 CI_options, eps_tau, bw_time, as_date, place_mu, place_q)
+                 CI_options, eps_tau, bw_time, as_date, place_mu, place_q,
+                 time_scale=time_scale)
         return finish(best_tree, smpl_times, best_tau, best_omega, best_phi,
                       best_Q, best_llh, b, M, dt, s, CI_options, eps_tau,
-                      bw_time, as_date, place_mu, place_q, threads)
+                      bw_time, as_date, place_mu, place_q, threads,
+                      time_scale=time_scale)
     return best_tree,best_llh,best_phi,best_omega        
 
 def EM_date(tree,smpl_times,init_rate_distr,refTree=None,s=1000,df=5e-4,maxIter=100,eps_tau=EPS_tau,fixed_tau=False,verbose=False,mu_avg=None,fixed_omega=False,pseudo=0,init_Q=None,threads=None):
@@ -182,10 +205,10 @@ def convert_to_time(tree,tau,omega,phi,Q):
     for node in tree.traverse_postorder():
         if not node.is_root():
             node.set_edge_length(float(tau[node.idx]))
-            node.mu = round(sum(o*p for (o,p) in zip(omega,Q[node.idx])),nDIGITS)
+            node.mu = sum(float(o)*float(p) for (o,p) in zip(omega,Q[node.idx]))
             node.q = [round(x,nDIGITS) for x in Q[node.idx]]
         else:
-            node.mu = round(sum(o*p for (o,p) in zip(omega,phi)),nDIGITS)
+            node.mu = sum(float(o)*float(p) for (o,p) in zip(omega,phi))
             node.q = None
 
 def compute_divergence_time(tree,sampling_time):
@@ -238,7 +261,8 @@ def convert_divTime(t,bw_time=False,as_date=False):
     if as_date:
         divTime = years_to_date(t)
     else:
-        divTime = str(round(t,nDIGITS)) if not bw_time else str(-round(t,nDIGITS))
+        # Absolute decimal rounding would erase small times after unit conversion.
+        divTime = str(float(-t if bw_time else t))
     return divTime    
 
 def annotate_divergence_time(tree,bw_time=False,as_date=False,place_mu=True,place_q=False):
@@ -816,7 +840,12 @@ def compute_CI(a_list,p_lower=0.025,p_upper=0.975):
     idx_higher = ceil(p_upper*N)-1
     return s_list[idx_lower],s_list[idx_higher]
 
-def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_tau=EPS_tau,threads=None,bw_time=False,as_date=False):
+def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_tau=EPS_tau,threads=None,bw_time=False,as_date=False,time_scale=None):
+    time_scale = time_scale or TimeScale()
+    smpl_times = time_scale.normalize_times(smpl_times)
+    omega = [o * time_scale.span for o in omega]
+    dt = np.asarray(dt) / time_scale.span
+    eps_tau /= time_scale.span
     if CI_options.get('seed') is not None:
         seed(CI_options['seed'])
     nboots = CI_options['nboots']
@@ -835,7 +864,7 @@ def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_
         R = multinomial(omega,phi) 
         omega_lower = R.get_quantize(p_lower) 
         omega_upper = R.get_quantize(p_upper) 
-        node.mu_CI = (p_lower,omega_lower,p_upper,omega_upper)     
+        node.mu_CI = (p_lower,omega_lower/time_scale.span,p_upper,omega_upper/time_scale.span)
         mu_avg[node.idx] = sum(o*p for o,p in zip(omega,phi))
         #for i in range(nboots):            
         #    mu_boots[i][node.idx] = R.randomize()
@@ -910,7 +939,14 @@ def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_
         print("CI sample {}/{}: completed with {} in {:.2f}s".format(
             i+1, nboots, solver, time.monotonic()-started), flush=True)
 
+    # All exported samples and intervals use the caller's original units.
+    tau_boots = [values * time_scale.span for values in tau_boots]
+    mu_boots = [values / time_scale.span for values in mu_boots]
+    divTime_boots = [time_scale.origin + values * time_scale.span for values in divTime_boots]
     for node in tree.traverse_postorder():
+        node.time = divTime_boots[-1][node.idx]
+        if not node.is_root():
+            node.edge_length = float(tau_boots[-1][node.idx])
         divTime_list = [divTime_boots[i][node.idx] for i in range(nboots)]
         divTime_lower,divTime_upper = compute_CI(divTime_list,p_lower=p_lower,p_upper=p_upper)
         node.divTime_CI = (p_lower,divTime_lower,p_upper,divTime_upper)     
