@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.6
+
+- Build categorical CDFs from the probabilities in sorted rate order. This
+  corrects sampling and quantiles for unsorted categories with unequal weights.
+  It can change branch-rate CI annotations and custom simulations, but leaves
+  dating estimates and uniformly sampled time-CI replicates unchanged.
+- Add permutation and exact before/after regression tests for fitted dates,
+  rates, likelihoods, time intervals, and exported CI replicate trees.
+
 ## 1.1.5
 
 - Normalize calibration times by their span before rate initialization and EM

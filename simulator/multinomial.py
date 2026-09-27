@@ -30,7 +30,8 @@ class multinomial:
         S = sorted(zip(omega,phi))
         self.omega = [x[0] for x in S]
         self.phi = [x[1] for x in S]
-        self.acc = cdf_from_pdf(phi) # accumulative density        
+        # The CDF must use the same category order as the sorted rates.
+        self.acc = cdf_from_pdf(self.phi)
 
     def get_quantize(self,q):
         if not 0 <= q <= 1:
