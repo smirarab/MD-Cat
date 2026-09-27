@@ -424,8 +424,10 @@ def setup_constr(tree,smpl_times,s,eps_tau=EPS_tau,pseudo=0):
             continue
         # internal nodes
         active_children = [c for c in node.child_nodes() if c.active]
-        node.active = (len(active_children) > 0)
-        if not node.active:
+        node.active = node.label in smpl_times or bool(active_children)
+        # A calibrated internal node is an anchor even without sampled tips.
+        # Its own constraint and time, initialized above, propagate upward.
+        if not active_children:
             continue
         else:                    
             child0 = active_children[0]

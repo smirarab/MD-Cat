@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.7 (bug fix)
+
+- Previously some internal node constraints were omitted from the optimizer's equality
+  constraints when some tips had sampling times and others didn't. 
+  Fossil runs with default tip times (`-b`) or runs with `-f` and trees with all
+  tips given sampling times were not affected.
+- Add exhaustive calibration-subset coverage and exact before/after checks
+  for fossil, fully tip-sampled, and fully node-sampled fits and CI samples.
+
 ## 1.1.6
 
 - Build categorical CDFs from the probabilities in sorted rate order. This
