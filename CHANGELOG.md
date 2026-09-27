@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.11
+
+- Construct calibration constraints directly as CSR matrices and use sparse
+  diagonals in fitting and CI, eliminating unnecessary dense quadratic storage.
+  Preserve the dense conic formulation's scaling for MOSEK/CVXOPT/ECOS,
+  avoiding numerical drift from a direct sparse quadratic-form substitution.
+  Mathematical objectives, constraints, and solver tolerances are unchanged.
+- Save sparse constraints in schema-2 CI checkpoints; continue reading schema-1
+  dense checkpoints. Older MD-Cat versions cannot read schema-2 checkpoints.
+- Compare dense/sparse fits and CI samples with OSQP, CVXOPT, Clarabel, and
+  licensed MOSEK, including the astralpro.l6p1 calibration cases.
+
 ## 1.1.10
 
 - Try alternative solvers and clipping recovery on the same CI draw first.

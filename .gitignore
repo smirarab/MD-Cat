@@ -14,6 +14,7 @@
 !/tests/test_annotations.py
 !/tests/test_em_consistency.py
 !/tests/test_solver_acceptance.py
+!/tests/test_sparse_optimization.py
 *.tre
 *temp*
 *.pyc

@@ -16,7 +16,7 @@ import time
 import sys
 from copy import deepcopy
 import cvxpy as cp
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, diags
 import mosek
 
 EPS_tau=1e-3
@@ -85,23 +85,25 @@ def _calibration_error(values, M, dt, solver_tolerances=None):
 
 
 def _solve_durations(problem, variable, M, dt, solvers=DURATION_SOLVERS,
-                     threads=None, context="optimization", solver_tolerances=None):
+                     threads=None, context="optimization", solver_tolerances=None, conic_problem=None):
     """Try every solver on one problem; clip only as a final recovery step."""
     solver_tolerances = validate_solver_tolerances(solver_tolerances)
     failures = []
     clipping_candidates = []
     for solver in solvers:
+        use_conic = conic_problem is not None and solver in (cp.MOSEK, cp.CVXOPT, cp.ECOS)
+        current_problem = conic_problem if use_conic else problem
         options = {"mosek_params": {"MSK_IPAR_NUM_THREADS": threads}} if solver == cp.MOSEK and threads is not None else {}
         # Do not allow a failed attempt to reuse a previous solver's values.
         variable.value = None
         try:
-            _solve_logged(problem, solver, context=context, **options)
+            _solve_logged(current_problem, solver, context=context, **options)
         except Exception as exc:
             failures.append("{}: {}: {}".format(solver, type(exc).__name__, " ".join(str(exc).split())))
             continue
         detail = None
-        if problem.status != cp.OPTIMAL:
-            detail = "status {}".format(problem.status)
+        if current_problem.status != cp.OPTIMAL:
+            detail = "status {}".format(current_problem.status)
         elif variable.value is None or not np.all(np.isfinite(variable.value)):
             detail = "missing or non-finite solution"
         else:
@@ -486,7 +488,17 @@ def setup_smpl_time(tree,sampling_time=None,bw_time=False,as_date=False,root_tim
 def setup_constr(tree,smpl_times,s,eps_tau=EPS_tau,pseudo=0):
     N = len(list(tree.traverse_postorder()))-1
 
-    M = []
+    rows, columns, data = [], [], []
+
+    def append_row(positive, negative=()):
+        coefficients = {index: 1. for index in positive}
+        for index in negative:
+            coefficients[index] = coefficients.get(index, 0.) - 1.
+        for index in sorted(coefficients):
+            if coefficients[index]:
+                rows.append(len(dt))
+                columns.append(index)
+                data.append(coefficients[index])
     dt = []
     
     idx = 0
@@ -502,8 +514,7 @@ def setup_constr(tree,smpl_times,s,eps_tau=EPS_tau,pseudo=0):
             node.active = True
             node.t = smpl_times[node.label]
             if not node.is_root():
-                node.constraint = [0.]*N
-                node.constraint[node.idx] = 1
+                node.constraint = {node.idx}
         if node.is_leaf():
             node.active = node.label in smpl_times
             continue
@@ -517,19 +528,18 @@ def setup_constr(tree,smpl_times,s,eps_tau=EPS_tau,pseudo=0):
         else:                    
             child0 = active_children[0]
             for child in active_children[1:]: 
-                m = [x-y for (x,y) in zip(child0.constraint,child.constraint)]
+                append_row(child0.constraint, child.constraint)
                 dt_i = child0.t - child.t
-                M.append(m)
                 dt.append(dt_i)
             if node.label in smpl_times:
-                m = child0.constraint
+                append_row(child0.constraint)
                 dt_i = child0.t - node.t
-                M.append(m) 
                 dt.append(dt_i) 
             elif not node.is_root():    
                 node.constraint = child0.constraint
-                node.constraint[node.idx] = 1
+                node.constraint.add(node.idx)
                 node.t = child0.t
+    M = csr_matrix((data, (rows, columns)), shape=(len(dt), N))
     return M,dt,b
 
 #def log_sum_exp(numlist):
@@ -893,16 +903,30 @@ def compute_tau_star_cvxpy(tau,omega,Q,b,s,M,dt,eps_tau=EPS_tau,var_apprx=False,
             Pd[i] += Q[i][j]*omega[j]**2/w_ij
             q[i] -= 2*b[i]*Q[i][j]*omega[j]/w_ij
           
-    P = np.diag(Pd)        
+    P = diags(Pd, format='csc')
     var_tau = cp.Variable(N)
     
     objective = cp.Minimize(cp.quad_form(var_tau,P) + q.T @ var_tau)
     constraints = [np.zeros(N)+eps_tau <= var_tau, csr_matrix(M)@var_tau == np.array(dt)]
     prob = cp.Problem(objective,constraints)
+    # Dense CVXPY quadratic-form conversion normalizes the diagonal before
+    # forming a cone. Preserve that scaling explicitly without a dense matrix.
+    scale = float(np.max(np.abs(Pd)))
+    scaled = Pd / scale if scale else Pd
+    # Match CVXPY's float64 dense quadratic-form pivot cutoff.
+    mask = scaled > 1e6 * np.finfo(float).eps
+    if np.any(mask):
+        factor = diags(np.sqrt(scaled), format='csc')[mask, :]
+        conic_quadratic = scale * cp.sum_squares(factor @ var_tau)
+    else:
+        conic_quadratic = cp.Constant(0.)
+    conic_objective = cp.Minimize(conic_quadratic + q.T @ var_tau)
+    conic_problem = cp.Problem(conic_objective, constraints)
     solver_map = {'mosek':cp.MOSEK,'osqp':cp.OSQP,'cvxopt':cp.CVXOPT,'ecos':cp.ECOS}
     values, _ = _solve_durations(prob, var_tau, M, dt,
                                  solvers=tuple(solver_map[name] for name in solvers),
-                                 threads=threads, solver_tolerances=solver_tolerances)
+                                 threads=threads, solver_tolerances=solver_tolerances,
+                                 conic_problem=conic_problem)
     return values
 
 def compute_CI(a_list,p_lower=0.025,p_upper=0.975):
@@ -962,8 +986,8 @@ def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_
             bb = b_boots[i]
             var_tau = cp.Variable(N)
             # Omit unnecessary constant s (numerical issues).
-            W = np.diag([sqrt(1/x) for x in bb])
-            objective = cp.Minimize(cp.sum_squares(W @ (bb-np.diag(mu) @ var_tau)))
+            W = diags([sqrt(1/x) for x in bb], format='csc')
+            objective = cp.Minimize(cp.sum_squares(W @ (bb-diags(mu, format='csc') @ var_tau)))
             constraints = [np.zeros(N)+eps_tau <= var_tau, csr_matrix(M)@var_tau == np.array(dt)]
             prob = cp.Problem(objective,constraints)
             try:

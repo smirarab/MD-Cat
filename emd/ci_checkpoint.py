@@ -36,10 +36,14 @@ def save(path, tree, smpl_times, tau, omega, phi, Q, llh, b, M, dt, s,
     for key in ('samples_file', 'fitted_file', 'checkpoint_file'):
         if options.get(key):
             options[key] = str(Path(options[key]).resolve())
-    state = dict(schema=1, version=PROGRAM_VERSION, tree=tree.newick(),
+    from scipy.sparse import csr_matrix
+    matrix = csr_matrix(M)
+    packed_matrix = dict(data=matrix.data.tolist(), indices=matrix.indices.tolist(),
+                         indptr=matrix.indptr.tolist(), shape=list(matrix.shape))
+    state = dict(schema=2, version=PROGRAM_VERSION, tree=tree.newick(),
                  indices=[n.idx for n in tree.traverse_postorder()],
                  smpl_times=smpl_times, tau=tau, omega=omega, phi=phi, Q=Q,
-                 llh=llh, b=b, M=M, dt=dt, s=s, options=options,
+                 llh=llh, b=b, M=packed_matrix, dt=dt, s=s, options=options,
                  eps_tau=eps_tau, bw_time=bw_time, as_date=as_date,
                  place_mu=place_mu, place_q=place_q, annotate=annotate, solver_tolerances=solver_tolerances, random_state=random.getstate())
     if time_scale is not None:
@@ -93,8 +97,13 @@ def resume(path, options=None, samples_file=None, ci_seed=None, threads=None, so
     from treeswift import read_tree_newick
     with open(path) as handle:
         state = json.load(handle)
-    if state.get('schema') != 1:
+    if state.get('schema') not in (1, 2):
         raise ValueError('Unsupported CI checkpoint schema')
+    if state['schema'] == 2:
+        from scipy.sparse import csr_matrix
+        matrix = state['M']
+        state['M'] = csr_matrix((matrix['data'], matrix['indices'], matrix['indptr']),
+                                shape=tuple(matrix['shape']))
     tree = read_tree_newick(state['tree'])
     nodes = list(tree.traverse_postorder())
     if len(nodes) != len(state['indices']):

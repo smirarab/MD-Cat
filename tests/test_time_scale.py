@@ -10,6 +10,7 @@ from unittest.mock import patch
 
 import cvxpy as cp
 import numpy as np
+from scipy.sparse import csr_matrix
 from treeswift import read_tree_newick
 
 from emd import emd_normal_lib as emd
@@ -103,7 +104,7 @@ class TimeNormalizationTest(unittest.TestCase):
                     self.assertEqual(state['time_scale']['origin'], origin)
                     self.assertAlmostEqual(state['eps_tau']/scale, .001)
                     self.assertEqual(state['smpl_times']['R'], origin)
-                    np.testing.assert_allclose(np.array(state['M']) @ state['tau'], state['dt'],
+                    np.testing.assert_allclose(csr_matrix((state['M']['data'], state['M']['indices'], state['M']['indptr']), shape=state['M']['shape']) @ state['tau'], state['dt'],
                                                atol=scale*1e-7)
                     np.testing.assert_allclose(np.array(state['omega'])*scale, baseline[3], rtol=1e-7)
                     # The pre-CI artifact must also contain physical durations.

@@ -83,9 +83,9 @@ class InternalCalibrationTest(unittest.TestCase):
                 anchor = next(iter(times))
                 expected = np.array([np.r_[paths[l]-paths[anchor], times[l]-times[anchor]]
                                      for l in times if l != anchor]).reshape(-1, 9)
-                actual = np.column_stack((np.array(M).reshape(-1, 8), dt))
-                self.assertEqual(len(M), len(times)-1)
-                if len(M):
+                actual = np.column_stack((M.toarray().reshape(-1, 8), dt))
+                self.assertEqual(M.shape[0], len(times)-1)
+                if M.shape[0]:
                     self.assertEqual(np.linalg.matrix_rank(actual), len(times)-1)
                     self.assertEqual(np.linalg.matrix_rank(np.vstack((actual, expected))), len(times)-1)
 
@@ -100,9 +100,10 @@ class InternalCalibrationTest(unittest.TestCase):
                 if leaf is not None:
                     constraints.update({label: -leaf if backward else leaf
                                         for label in ('A', 'B', 'C', 'D')})
-                self.assertEqual(
-                    legacy_setup_constr(read_tree_newick(TREE), constraints, 1000),
-                    emd.setup_constr(read_tree_newick(TREE), constraints, 1000))
+                old_constraints = legacy_setup_constr(read_tree_newick(TREE), constraints, 1000)
+                new_constraints = emd.setup_constr(read_tree_newick(TREE), constraints, 1000)
+                np.testing.assert_array_equal(old_constraints[0], new_constraints[0].toarray())
+                self.assertEqual(old_constraints[1:], new_constraints[1:])
                 old, old_samples = self.fit(times, backward, leaf, legacy=True)
                 new, new_samples = self.fit(times, backward, leaf)
                 self.assertEqual(old[1:], new[1:])

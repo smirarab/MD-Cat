@@ -227,3 +227,18 @@ replacement, up to ten total draws per requested sample. A warning reports
 `X/N` samples that needed replacement and the total replacement draws, noting
 that this may bias CI. Persistent failure stops CI; the fitted tree and
 pre-CI checkpoint remain available. Solver fallback alone does not redraw.
+
+## Sparse optimization storage
+
+Calibration equations are stored in CSR format, and diagonal matrices in the
+fitting and CI objectives use sparse storage. This preserves the mathematical
+problem and acceptance tolerances while avoiding dense quadratic allocations.
+The conic formulation explicitly retains the dense formulation's diagonal
+normalization to avoid changes caused by sparse factorization.
+Constraint storage scales with the number of nonzero path coefficients; it is
+not guaranteed linear for every tree shape and calibration arrangement.
+
+CI checkpoints use schema 2 to store sparse constraints. This version also reads
+older schema-1 checkpoints; older versions cannot read the new schema. CVXPY
+problems are still constructed for each solve; parameterized problem reuse is a
+separate potential optimization.

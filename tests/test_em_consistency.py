@@ -41,6 +41,6 @@ class EMConsistencyTest(unittest.TestCase):
                 posterior = emd.run_Estep(constraints['b'], 1000, result['omega'],
                                          result['tau'], result['phi'], var_apprx=True)
                 np.testing.assert_array_equal(result['Q'], posterior)
-                np.testing.assert_allclose(np.asarray(constraints['M']) @ result['tau'],
+                np.testing.assert_allclose(constraints['M'] @ result['tau'],
                                            constraints['dt'], atol=1e-7, rtol=0)
                 self.assertGreaterEqual(min(result['tau']), emd.EPS_tau-1e-7)
