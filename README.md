@@ -277,4 +277,7 @@ The following options are useful to explore:
 * `-r` and `-f` can be used to set the time at the root and the leaves.
 * `--maxIter` to adjust the maximum number of iterations of the internal optimizer.
 * `--randSeed` can be used to set the seed number, to enable reproducible results.
-* `--annotate` can be used to set the level of annotation on the output tree. 
+* `--annotate` sets output annotations: `0` omits annotations, `1` adds times,
+  `2` adds times and rates (default), and `3` also adds rate probabilities.
+  Use `--annotate 0` to reproduce the unannotated output of older non-CI runs.
+  With `--CI`, level `0` also omits interval annotations from the fitted tree.

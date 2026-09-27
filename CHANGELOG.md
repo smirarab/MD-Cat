@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.9
+
+- Accept the final EM update and recompute its posterior probabilities before
+  stopping on convergence. Returned durations, rates, likelihood, and posteriors
+  now describe the same iterate, including first-iteration convergence.
+  Fitted estimates, restart selection, and confidence intervals can change.
+- Test consistency and calibration constraints at convergence and iteration-limit
+  exits, including a forced first-iteration convergence case.
+
+## 1.1.8 (defualt output format change)
+
+- Write time and requested rate/probability annotations for runs without
+  `--CI`, honoring all three `--annotate` levels and the default level 2.
+  Annotations use restored time/rate units and do not change fitted results.
+- Add `--annotate 0` to write an unannotated tree, reproducing older non-CI
+  output. CI checkpoints retain this setting; the default remains level 2.
+
+
 ## 1.1.7 (bug fix)
 
 - Previously some internal node constraints were omitted from the optimizer's equality

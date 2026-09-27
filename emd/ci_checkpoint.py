@@ -28,7 +28,7 @@ def atomic_text(path, text):
 
 
 def save(path, tree, smpl_times, tau, omega, phi, Q, llh, b, M, dt, s,
-         options, eps_tau, bw_time, as_date, place_mu, place_q, time_scale=None):
+         options, eps_tau, bw_time, as_date, place_mu, place_q, time_scale=None, annotate=True):
     import numpy as np
     from copy import deepcopy
     from emd.emd_normal_lib import annotate_divergence_time
@@ -41,7 +41,7 @@ def save(path, tree, smpl_times, tau, omega, phi, Q, llh, b, M, dt, s,
                  smpl_times=smpl_times, tau=tau, omega=omega, phi=phi, Q=Q,
                  llh=llh, b=b, M=M, dt=dt, s=s, options=options,
                  eps_tau=eps_tau, bw_time=bw_time, as_date=as_date,
-                 place_mu=place_mu, place_q=place_q, random_state=random.getstate())
+                 place_mu=place_mu, place_q=place_q, annotate=annotate, random_state=random.getstate())
     if time_scale is not None:
         # Existing schema-1 numerical fields remain in original units.
         state['time_scale'] = dict(origin=time_scale.origin, span=time_scale.span)
@@ -53,8 +53,9 @@ def save(path, tree, smpl_times, tau, omega, phi, Q, llh, b, M, dt, s,
         raise TypeError(f'Cannot checkpoint {type(value).__name__}')
     atomic_text(path, json.dumps(state, default=numeric, allow_nan=False))
     fitted = deepcopy(tree)
-    annotate_divergence_time(fitted, bw_time=bw_time, as_date=as_date,
-                             place_mu=place_mu, place_q=place_q)
+    if annotate:
+        annotate_divergence_time(fitted, bw_time=bw_time, as_date=as_date,
+                                 place_mu=place_mu, place_q=place_q)
     fitted_path = options['fitted_file']
     atomic_text(fitted_path, fitted.newick() + '\n')
     print(f'Saved fitted tree without CIs: {fitted_path}', flush=True)
@@ -62,7 +63,7 @@ def save(path, tree, smpl_times, tau, omega, phi, Q, llh, b, M, dt, s,
 
 
 def finish(tree, smpl_times, tau, omega, phi, Q, llh, b, M, dt, s,
-           options, eps_tau, bw_time, as_date, place_mu, place_q, threads, time_scale=None):
+           options, eps_tau, bw_time, as_date, place_mu, place_q, threads, time_scale=None, annotate=True):
     import numpy as np
     from emd.emd_normal_lib import (get_confidence_interval, convert_to_time,
                                    compute_divergence_time, annotate_divergence_time)
@@ -77,6 +78,8 @@ def finish(tree, smpl_times, tau, omega, phi, Q, llh, b, M, dt, s,
     convert_to_time(tree, tau, omega, phi, Q)
     for node in tree.traverse_postorder():
         node.time = time_scale.origin + node.time * time_scale.span
+    if not annotate:
+        return tree, llh, phi, omega
     annotate_divergence_time(tree, place_mu=place_mu, place_q=place_q,
                              as_date=as_date, bw_time=bw_time)
     for node in tree.traverse_preorder():
@@ -113,4 +116,5 @@ def resume(path, options=None, samples_file=None, ci_seed=None, threads=None):
             'eps_tau', 'bw_time', 'as_date', 'place_mu', 'place_q')
     time_scale = TimeScale(**state.get('time_scale', {}))
     return finish(tree, options=saved_options, threads=threads, time_scale=time_scale,
+                  annotate=state.get("annotate", True),
                   **{key: state[key] for key in keys})

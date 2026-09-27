@@ -73,7 +73,7 @@ def add_dating_options(parser, sampled=False):
     parser.add_argument('--CI', type=ci_options, metavar='"N LOWER UPPER"', help='CI replicates and endpoint quantiles, e.g. "100 0.025 0.975" (default: off)')
     parser.add_argument('--randSeed', type=seed_int if sampled else str,
                         help='Master integer seed for sampling and all jobs (default: config seed, then randomly generated and saved)' if sampled else 'Integer seed or quoted list of -p seeds (default: auto-select)')
-    parser.add_argument('--annotate', type=int, choices=(1, 2, 3), default=2, help='Per-run annotations: 1=times, 2=times and rates, 3=also full rate probabilities (default: %(default)s)')
+    parser.add_argument('--annotate', type=int, choices=(0, 1, 2, 3), default=2, help='Per-run annotations: 0=none, 1=times, 2=times and rates, 3=also full rate probabilities (default: %(default)s)')
     parser.add_argument('--threads', '--cores', type=positive_int, default=None,
                         help='Numerical/solver threads per dating process (default: config nthreads, then 1)' if sampled else 'Numerical/solver threads (default: library defaults)')
     parser.add_argument('--min-branch', type=positive_float, default=.001,
@@ -132,6 +132,7 @@ def execute(args):
                    verbose=args['verbose'], randseed=randseed, pseudo=1,
                    root_time=root, leaf_time=leaf, bw_time=bw, as_date=as_date,
                    place_mu=args['annotate'] >= 2, place_q=args['annotate'] >= 3,
+                   annotate=args['annotate'] > 0,
                    CI_options=args['CI'], threads=args['threads'], min_branch=args['min_branch'])
     output = args['output'] or (args['input'] + '.mdcatTree')
     result[0].write_tree_newick(output)

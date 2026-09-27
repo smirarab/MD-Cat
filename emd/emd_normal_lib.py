@@ -59,7 +59,7 @@ def initialize_rates(k,mu):
         phi.append(p)
     return multinomial(omega,phi)
 
-def MDCat(tree,k,sampling_time=None,bw_time=False,as_date=False,root_time=0,leaf_time=1,nrep=100,maxIter=100,randseed=None,pseudo=1,s=1000,verbose=False,place_mu=True,place_q=False,refTree=None,fixed_tau=False,fixed_omega=False,init_Q=None,CI_options=None,threads=None,min_branch=EPS_tau):
+def MDCat(tree,k,sampling_time=None,bw_time=False,as_date=False,root_time=0,leaf_time=1,nrep=100,maxIter=100,randseed=None,pseudo=1,s=1000,verbose=False,place_mu=True,place_q=False,refTree=None,fixed_tau=False,fixed_omega=False,init_Q=None,CI_options=None,threads=None,min_branch=EPS_tau,annotate=True):
     if not np.isfinite(min_branch) or min_branch <= 0:
         raise ValueError("min_branch must be finite and positive")
     _solver_messages.clear()
@@ -75,9 +75,9 @@ def MDCat(tree,k,sampling_time=None,bw_time=False,as_date=False,root_time=0,leaf
                 node.edge_length /= time_scale.span
     mu_avg = rtt_mu(tree,smpl_times)
     init_rate_distr = initialize_rates(k,mu_avg) 
-    return EM_date_random_init(tree,smpl_times,init_rate_distr,s=s,nrep=nrep,maxIter=maxIter,refTree=refTree,init_Q=init_Q,fixed_tau=fixed_tau,fixed_omega=fixed_omega,verbose=verbose,mu_avg=mu_avg,randseed=randseed,pseudo=pseudo,place_mu=place_mu,place_q=place_q,as_date=as_date,bw_time=bw_time,CI_options=CI_options,threads=threads,eps_tau=min_branch/time_scale.span,time_scale=time_scale)
+    return EM_date_random_init(tree,smpl_times,init_rate_distr,s=s,nrep=nrep,maxIter=maxIter,refTree=refTree,init_Q=init_Q,fixed_tau=fixed_tau,fixed_omega=fixed_omega,verbose=verbose,mu_avg=mu_avg,randseed=randseed,pseudo=pseudo,place_mu=place_mu,place_q=place_q,as_date=as_date,bw_time=bw_time,CI_options=CI_options,threads=threads,eps_tau=min_branch/time_scale.span,time_scale=time_scale,annotate=annotate)
 
-def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=100,refTree=None,init_Q=None,fixed_tau=False,verbose=False,mu_avg=None,fixed_omega=False,randseed=None,pseudo=0,place_mu=True,place_q=False,as_date=False,bw_time=False,CI_options=None,threads=None,eps_tau=EPS_tau,time_scale=None):
+def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=100,refTree=None,init_Q=None,fixed_tau=False,verbose=False,mu_avg=None,fixed_omega=False,randseed=None,pseudo=0,place_mu=True,place_q=False,as_date=False,bw_time=False,CI_options=None,threads=None,eps_tau=EPS_tau,time_scale=None,annotate=True):
     time_scale = time_scale or TimeScale()
     best_llh = -float("inf")
     best_tree = None
@@ -118,7 +118,6 @@ def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=
         convert_to_time(new_tree,tau,omega,phi,Q)
         # compute divergence times
         compute_divergence_time(new_tree,smpl_times)
-        #annotate_divergence_time(new_tree,place_mu=place_mu,place_q=place_q,as_date=as_date,bw_time=bw_time)
 
         # output
         if verbose:
@@ -154,12 +153,15 @@ def EM_date_random_init(tree,smpl_times,init_rate_distr,s=1000,nrep=100,maxIter=
             save(CI_options['checkpoint_file'], best_tree, smpl_times, best_tau,
                  best_omega, best_phi, best_Q, best_llh, b, M, dt, s,
                  CI_options, eps_tau, bw_time, as_date, place_mu, place_q,
-                 time_scale=time_scale)
+                 time_scale=time_scale, annotate=annotate)
         return finish(best_tree, smpl_times, best_tau, best_omega, best_phi,
                       best_Q, best_llh, b, M, dt, s, CI_options, eps_tau,
                       bw_time, as_date, place_mu, place_q, threads,
-                      time_scale=time_scale)
-    return best_tree,best_llh,best_phi,best_omega        
+                      time_scale=time_scale, annotate=annotate)
+    if annotate:
+        annotate_divergence_time(best_tree, place_mu=place_mu, place_q=place_q,
+                                 as_date=as_date, bw_time=bw_time)
+    return best_tree,best_llh,best_phi,best_omega
 
 def EM_date(tree,smpl_times,init_rate_distr,refTree=None,s=1000,df=5e-4,maxIter=100,eps_tau=EPS_tau,fixed_tau=False,verbose=False,mu_avg=None,fixed_omega=False,pseudo=0,init_Q=None,threads=None):
     M, dt, b = setup_constr(tree,smpl_times,s,eps_tau=eps_tau,pseudo=pseudo)
@@ -183,14 +185,16 @@ def EM_date(tree,smpl_times,init_rate_distr,refTree=None,s=1000,df=5e-4,maxIter=
         curr_df = None if pre_llh is None else llh - pre_llh
         if verbose:
             print("Current df: " + str(curr_df))
-        if curr_df is not None and abs(curr_df) < df:
-            break
         tau = next_tau    
         omega = next_omega
         pre_llh = llh    
         if verbose:    
             print("Estep ...")
         Q = run_Estep(b,s,omega,tau,phi,var_apprx=True)
+        # Return parameters, likelihood and posteriors from the same iterate,
+        # including when the first constrained update satisfies convergence.
+        if curr_df is not None and abs(curr_df) < df:
+            break
     
     #if CI_options is not None:    
     #    get_confidence_interval(tree,smpl_times,omega,Q,np.array(b),s,M,dt,CI_options,eps_tau=EPS_tau)
