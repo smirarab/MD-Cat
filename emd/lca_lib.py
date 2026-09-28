@@ -24,6 +24,7 @@ def find_LCAs(myTree,myQueries):
         E = [root]
         H = {root: 1}
         F = {root.label: 0}
+        duplicates = set()
         stack = [(root, iter(root.children))]
         while stack:
             node, children = stack[-1]
@@ -34,11 +35,13 @@ def find_LCAs(myTree,myQueries):
                     # Revisit the parent after completing each child subtree.
                     E.append(stack[-1][0])
             else:
+                if child.label in F:
+                    duplicates.add(child.label)
                 F[child.label] = len(E)
                 H[child] = H[node] + 1
                 E.append(child)
                 stack.append((child, iter(child.children)))
-        return E,F,H
+        return E,F,H,duplicates
     def min_segment_tree(E,H):
     # build a min segment-tree
     # to query the minimum of any range of H
@@ -82,6 +85,13 @@ def find_LCAs(myTree,myQueries):
                 + ": node name(s) not found in the input tree: "
                 + ", ".join(missing))
 
+        ambiguous = sorted(set(q) & duplicates)
+        if ambiguous:
+            raise ValueError(
+                "calibration query " + "+".join(q)
+                + ": ambiguous duplicate node name(s) in the input tree: "
+                + ", ".join(ambiguous))
+
         L = None
         R = None
         for a in q:
@@ -89,7 +99,7 @@ def find_LCAs(myTree,myQueries):
             R = max(F[a],R) if R is not None else F[a]
         return __query__(1,0,len(E)-1,L,R)
 
-    E,F,H = euler_tour()
+    E,F,H,duplicates = euler_tour()
     t = min_segment_tree(E,H)
     myLCAs = []
     for q in myQueries:

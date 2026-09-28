@@ -200,7 +200,11 @@ Archaefructus=Nuphar+Trithuria 126.5
 Aquifoliaceae 66.5
 ```
 
-An internal node can be identified by either its label or the LCA of 2 or more species separated by `+`. Moreover, a name for this internal node can be optionally specified using `=`. In our example, the 4 calibration points are: the internal node labeled as `Fagales`, the LCA of `(Terminalia and Eucalyptus)` that we wish to name `Myrtales`, the LCA of `(Nuphar and Trithuria)` that we wish to name `Archaefructus`, and the internal node labeled as `Aquifoliaceae`. Note that label assignments in ```input.txt``` will override the original input tree's labels.
+* An internal node can be identified by either its label or the LCA of 2 or more species separated by `+`. 
+* A name for this internal node can be optionally specified using `=`. In our example, the 4 calibration points are: the internal node labeled as `Fagales`, the LCA of `(Terminalia and Eucalyptus)` that we wish to name `Myrtales`, the LCA of `(Nuphar and Trithuria)` that we wish to name `Archaefructus`, and the internal node labeled as `Aquifoliaceae`. 
+* Note that label assignments in ```input.txt``` will override the original input tree's labels. 
+* A label referenced by a calibration must identify exactly one node; missing or duplicate referenced labels are rejected. 
+* The same naming syntax works for tips: `tip=A 2` renames tip `A` to `tip` and assigns it time `2`.
 
 ```bash
    python ../../md_cat.py -i input.nwk -t input.txt -o output.nwk -b -p 1 -v
@@ -279,3 +283,10 @@ The following options are useful to explore:
 * `--solver-tolerances ATOL RTOL NEGATIVE_ATOL` sets solver acceptance tolerances
   (defaults: `1e-7 1e-7 1e-8`). See [algorithm and workflow details](ALGORITHMS.md)
   for solver recovery, CI retries, and calibration sampling.
+
+### Legacy experimental module
+
+`emd.emd_umix_lib` is an unsupported uniform-mixture prototype retained for
+reference. Its dating driver, `EM_date_umix`, raises `NotImplementedError`
+because its core interfaces and branch-data assumptions are obsolete. Use
+`md_cat.py` or `emd.emd_normal_lib.MDCat` for supported categorical-model dating.

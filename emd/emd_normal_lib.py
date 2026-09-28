@@ -465,22 +465,27 @@ def setup_smpl_time(tree,sampling_time=None,bw_time=False,as_date=False,root_tim
             times.append(t)
             names.append(name)
     calibs = find_LCAs(tree,queries) 
+    label_counts = {}
+    for node in tree.traverse_preorder():
+        label_counts[node.label] = label_counts.get(node.label, 0) + 1
+    reserved_labels = set(label_counts) | {name for name in names if name}
     calibID = 1
     ndigits = len(str(len(calibs)))
     for node,time,name in zip(calibs,times,names):
         if node is None:
             continue
         if name:
-            if node.is_leaf():
-                node.taxon.label = name
-            else:
-                node.label = name
+            node.label = name
             lb = name
         else:
             if node.is_leaf():
                 lb = node.label
-            elif node.label is None:
+            elif node.label is None or label_counts.get(node.label, 0) > 1:
                 lb = "autoLabel" + str(calibID).rjust(ndigits,'0')
+                while lb in reserved_labels:
+                    calibID += 1
+                    lb = "autoLabel" + str(calibID).rjust(ndigits,'0')
+                reserved_labels.add(lb)
                 node.label = lb
                 calibID += 1
             else:

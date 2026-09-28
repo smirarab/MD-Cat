@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.14
+
+- Mostly input check and validation
+- Reject ambiguous duplicate calibration references while allowing repeated
+  internal support labels; assign unique labels to MRCA calibrations as needed.
+- Fix explicit tip renaming in calibration files (for example, `tip=A 2`).
+- Validate categorical input lengths, finite values, and probability vectors.
+- Mark the legacy uniform-mixture driver as unsupported and fail explicitly
+  with guidance to use the supported categorical dating implementation.
+
 ## 1.1.13
 
 - This is misc. scalability fixes. 

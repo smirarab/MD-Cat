@@ -65,6 +65,35 @@ class CategoryOrderingTest(unittest.TestCase):
                 self.assertEqual(before, after)
 
 
+class CategoryValidationTest(unittest.TestCase):
+    def test_invalid_inputs_are_rejected(self):
+        cases = [
+            ([], [], 'nonempty'),
+            ([1], [], 'nonempty'),
+            ([1, 2], [1], 'matching lengths'),
+            ([1], [.5, .5], 'matching lengths'),
+            ([float('nan')], [1], 'values must be finite'),
+            ([float('inf')], [1], 'values must be finite'),
+            ([1, 2], [-.1, 1.1], 'between 0 and 1'),
+            ([1, 2], [float('nan'), 1], 'between 0 and 1'),
+            ([1, 2], [float('inf'), 0], 'between 0 and 1'),
+            ([1, 2], [0, 0], 'sum to 1'),
+            ([1, 2], [.2, .3], 'sum to 1'),
+            ([1, 2], [.6, .6], 'sum to 1'),
+        ]
+        for omega, phi, message in cases:
+            with self.subTest(omega=omega, phi=phi):
+                with self.assertRaisesRegex(ValueError, message):
+                    distributions.multinomial(omega, phi)
+
+    def test_zero_probabilities_and_rounding_are_allowed(self):
+        dist = distributions.multinomial(iter([2, 1]), iter([1, 0]))
+        self.assertEqual(dist.phi, [0, 1])
+        self.assertEqual(dist.get_quantize(.5), 2)
+        dist = distributions.multinomial(range(10), [.1]*10)
+        self.assertEqual(dist.get_quantize(1), 9)
+
+
 class DatingOrderingRegressionTest(unittest.TestCase):
     def test_fits_and_time_ci_samples_match_legacy_constructor(self):
         # The second example has produced unsorted categories in real EM fits.

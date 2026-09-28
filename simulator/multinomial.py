@@ -27,6 +27,17 @@ def binary_search(arr,v,start=0,end=None):
 class multinomial:
     def __init__(self,omega,phi):
         # omega stores the values, phi stores the probability
+        omega, phi = list(omega), list(phi)
+        if not omega or not phi:
+            raise ValueError("categories and probabilities must be nonempty")
+        if len(omega) != len(phi):
+            raise ValueError("categories and probabilities must have matching lengths")
+        if not all(isfinite(value) for value in omega):
+            raise ValueError("category values must be finite")
+        if not all(isfinite(p) and 0 <= p <= 1 for p in phi):
+            raise ValueError("probabilities must be finite and between 0 and 1")
+        if not isclose(fsum(phi), 1.0, rel_tol=1e-12, abs_tol=1e-12):
+            raise ValueError("probabilities must sum to 1")
         S = sorted(zip(omega,phi))
         self.omega = [x[0] for x in S]
         self.phi = [x[1] for x in S]

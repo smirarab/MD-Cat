@@ -1,9 +1,15 @@
+"""Unsupported experimental uniform-mixture implementation, kept for reference.
+
+The dating driver depends on obsolete core interfaces and data structures.
+Use emd.emd_normal_lib.MDCat (or md_cat.py) for supported dating.
+The numerical helpers below have not been validated for production use.
+"""
+
 from math import log,pi,exp,sqrt
 from scipy.stats import norm
 from scipy.sparse import diags,csr_matrix
 from scipy.optimize import minimize, LinearConstraint,Bounds
 import numpy as np
-from emd.emd_normal_lib import setup_constr, init_EM,compute_divergence_time 
 from simulator.multinomial import multinomial
 from treeswift import *
 
@@ -193,46 +199,10 @@ def compute_tau_star(b,s,omega,tau,Q,M,dt,eps_tau=EPS_tau):
     return tau_star 
 
 def EM_date_umix(tree,smpl_times,root_age=None,refTree=None,trueTreeFile=None,s=1000,k=100,input_omega=None,df=5e-4,maxIter=100,eps_tau=EPS_tau,init_rate_distr=None,verbose=False):
-    M, dt, b = setup_constr(tree,smpl_times,s,root_age=root_age,eps_tau=eps_tau)
-    b_avg = [sum(b_i)/len(b_i) for b_i in b] 
-    tau, phi, omega = init_EM(tree,smpl_times,k=k,input_omega=input_omega,s=s,refTree=refTree,init_rate_distr=init_rate_distr)
-    if verbose:
-        print("Initialized EM")
-    pre_llh = f_ll_umix(b_avg,s,tau,omega,phi)
-    if verbose:
-        print("Initial likelihood: " + str(pre_llh))
-    for i in range(1,maxIter+1):
-        if verbose:
-            print("EM iteration " + str(i))
-            print("Estep ...")
-        Q = run_Estep_umix(b_avg,s,omega,tau,phi)
-        if verbose:
-            print("Mstep ...")   
-        next_phi,next_tau = run_Mstep_umix(b_avg,s,omega,tau,phi,Q,M,dt,eps_tau=eps_tau)
-        llh = f_ll_umix(b_avg,s,next_tau,omega,next_phi)
-        if verbose:
-            print("Current llh: " + str(llh))
-        curr_df = None if pre_llh is None else llh - pre_llh
-        if verbose:
-            print("Current df: " + str(curr_df))
-        if curr_df is not None and abs(curr_df) < df:
-            break
-        print(max(abs(t1-t2) for t1,t2 in zip(tau,next_tau)))
-        #print([p1-p2 for p1,p2 in zip(phi,next_phi)])
-        phi = next_phi
-        tau = next_tau    
-        pre_llh = llh    
-
-    # convert branch length to time unit and compute mu for each branch
-    for node in tree.traverse_postorder():
-        if not node.is_root():
-            node.set_edge_length(tau[node.idx])
-            node.mu = sum(o*p for (o,p) in zip(omega,Q[node.idx]))
-
-    # compute divergence times
-    compute_divergence_time(tree,smpl_times)
-
-    return tau,omega,phi,llh
+    raise NotImplementedError(
+        "EM_date_umix is an unsupported experimental legacy implementation; "
+        "its core interfaces are obsolete. Use emd.emd_normal_lib.MDCat "
+        "or md_cat.py for supported dating.")
 
 if __name__ == "__main__":
     from sys import argv

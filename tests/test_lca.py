@@ -7,6 +7,7 @@ import unittest
 
 from treeswift import Node, Tree, read_tree_newick
 from emd.lca_lib import find_LCAs
+from emd.emd_normal_lib import setup_smpl_time
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +20,37 @@ class CalibrationLookupTest(unittest.TestCase):
     def test_valid_queries_include_internal_node_names(self):
         nodes = find_LCAs(self.tree, [['A', 'B'], ['A', 'C'], ['A'], ['X']])
         self.assertEqual([node.label for node in nodes], ['X', 'R', 'A', 'X'])
+
+    def test_referenced_duplicate_labels_are_rejected(self):
+        for newick, query in (
+                ('((A:1,B:1)X:1,A:1)R;', ['A', 'B']),
+                ('((A:1,B:1)X:1,C:1)X;', ['X']),
+                ('((A:1,B:1)A:1,C:1)R;', ['A'])):
+            with self.subTest(newick=newick):
+                with self.assertRaisesRegex(ValueError, 'ambiguous duplicate node name'):
+                    find_LCAs(read_tree_newick(newick), [query])
+
+    def test_unreferenced_duplicate_support_labels_are_allowed(self):
+        tree = read_tree_newick('((A:1,B:1)95:1,(C:1,D:1)95:1)R;')
+        nodes = find_LCAs(tree, [['A', 'B'], ['C', 'D']])
+        self.assertEqual([node.label for node in nodes], ['95', '95'])
+        self.assertIsNot(nodes[0], nodes[1])
+
+    def test_named_tip_calibration_and_duplicate_support_mrcas(self):
+        for text, newick, expected in (
+                ('tip=A 2\n', '((A:1,B:1)X:1,C:1)R;', {'tip': 2}),
+                ('A+B 2\nC+D 3\n',
+                 '((A:1,B:1)95:1,(C:1,D:1)95:1)R;',
+                 {'autoLabel1': 2, 'autoLabel2': 3})):
+            with self.subTest(text=text), tempfile.TemporaryDirectory() as directory:
+                calibration = Path(directory) / 'times.txt'
+                calibration.write_text(text)
+                tree = read_tree_newick(newick)
+                times = setup_smpl_time(tree, str(calibration), root_time=None,
+                                        leaf_time=None)
+                self.assertEqual(times, expected)
+                for label in expected:
+                    self.assertEqual(sum(n.label == label for n in tree.traverse_preorder()), 1)
 
     def test_deep_caterpillar_tree(self):
         tree = Tree()

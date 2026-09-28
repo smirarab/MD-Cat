@@ -11,6 +11,7 @@
 !/tests/test_rtt.py
 !/tests/test_time_scale.py
 !/tests/test_multinomial.py
+!/tests/test_legacy_umix.py
 !/tests/test_internal_calibrations.py
 !/tests/test_annotations.py
 !/tests/test_em_consistency.py
