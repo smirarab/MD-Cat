@@ -1,7 +1,17 @@
 # Changelog
 
-## 1.1.11
+## 1.1.12 (important convention change)
 
+- This is a convention change. 
+- Order backward-time node-age CI annotations numerically: `t_lower` is the
+  younger age and `t_upper` the older age. Previously these labels were reversed
+  in individual `-b` CI outputs. Scripts relying on that ordering must adjust.
+  Fitted values, CI samples, forward/date output, rate and branch-duration CIs,
+  and pooled summary intervals are unchanged. Existing files are not rewritten.
+
+## 1.1.11 
+
+- This is a scalability release.
 - Construct calibration constraints directly as CSR matrices and use sparse
   diagonals in fitting and CI, eliminating unnecessary dense quadratic storage.
   Preserve the dense conic formulation's scaling for MOSEK/CVXOPT/ECOS,
@@ -34,7 +44,7 @@
 - Test consistency and calibration constraints at convergence and iteration-limit
   exits, including a forced first-iteration convergence case.
 
-## 1.1.8 (defualt output format change)
+## 1.1.8 (default output format change)
 
 - Write time and requested rate/probability annotations for runs without
   `--CI`, honoring all three `--annotate` levels and the default level 2.
@@ -45,7 +55,7 @@
 
 ## 1.1.7 (bug fix)
 
-- Previously some internal node constraints were omitted from the optimizer's equality
+- Previously, some internal node constraints were omitted from the optimizer's equality
   constraints when some tips had sampling times and others didn't. 
   Fossil runs with default tip times (`-b`) or runs with `-f` and trees with all
   tips given sampling times were not affected.

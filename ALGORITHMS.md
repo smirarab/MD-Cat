@@ -242,3 +242,19 @@ CI checkpoints use schema 2 to store sparse constraints. This version also reads
 older schema-1 checkpoints; older versions cannot read the new schema. CVXPY
 problems are still constructed for each solve; parameterized problem reuse is a
 separate potential optimization.
+
+## Time and CI endpoint conventions
+
+Node-time annotations use the requested output coordinates. Forward times and
+calendar dates increase toward the present; with `-b`, positive ages increase
+backward from the present. In all cases, `t_lower` and `t_upper` are ordered by
+the reported values. Thus a backward-age interval of 2–10 is written
+`t_lower=2,t_upper=10`: younger bound first, older bound second. Pooled
+`height_CI={2,10}` follows the same numerical ordering.
+
+Before version 1.1.12, individual backward-time CI outputs negated the endpoints
+without swapping their labels, producing `t_lower=10,t_upper=2` in this example.
+Version 1.1.12 corrects those annotations, including output regenerated from CI
+checkpoints. Existing files are unchanged. The correction does not alter fitted
+ages, rate estimates, CI replicate trees, branch-duration or rate intervals,
+forward/date annotations, or pooled summary intervals.

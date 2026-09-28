@@ -80,3 +80,60 @@ class AnnotationTest(unittest.TestCase):
                     time = -b.time if backward else b.time
                     self.assertIn('[t=' + str(time), b.label)
                     self.assertIn(',mu=' + str(b.mu), b.label)
+
+    def test_ci_bounds_follow_reported_coordinate_order(self):
+        from copy import deepcopy
+        from emd.util import date_to_years
+        date_mid = date_to_years("2015-01-01")
+        date_bounds = (date_to_years("2010-01-01"), date_to_years("2020-01-01"))
+        cases = [
+            (False, False, -5., (-10., -2.), '-10.0', '-2.0'),
+            (True, False, -5., (-10., -2.), '2.0', '10.0'),
+            (True, False, -5., (-5., -5.), '5.0', '5.0'),
+            (False, True, date_mid, date_bounds, '2010-01-01', '2020-01-01'),
+            (True, True, date_mid, date_bounds, '2010-01-01', '2020-01-01'),
+        ]
+        for backward, date, time, bounds, lower, upper in cases:
+            with self.subTest(backward=backward, date=date, bounds=bounds):
+                tree = read_tree_newick('(A:1,B:1)R;')
+                for node in tree.traverse_postorder():
+                    node.time = time
+                    node.divTime_CI = (.025, bounds[0], .975, bounds[1])
+                    node.mu = 2.
+                    node.mu_CI = (.025, 1., .975, 3.)
+                    node.q = None
+                    node.tau_CI = (.025, .5, .975, 1.5)
+                before = deepcopy(tree)
+                emd.annotate_divergence_time(tree, bw_time=backward, as_date=date)
+                for old, node in zip(before.traverse_postorder(), tree.traverse_postorder()):
+                    self.assertIn(f',t_lower={lower},t_upper={upper}', node.label)
+                    self.assertIn(',mu_lower=1.0,mu_upper=3.0', node.label)
+                    for attr in ('time', 'mu', 'divTime_CI', 'mu_CI', 'tau_CI', 'edge_length'):
+                        self.assertEqual(getattr(old, attr), getattr(node, attr))
+
+    def test_backward_ci_annotation_does_not_change_fit_or_replicates(self):
+        import re
+        original = cp.Problem.solve
+        def solve(problem, **kwargs):
+            return original(problem, solver=cp.OSQP, verbose=False)
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()), patch.object(cp.Problem, 'solve', solve):
+            samples = Path(directory)/'samples.nwk'
+            def fit(annotate):
+                result = emd.MDCat(read_tree_newick('((A:.1,B:.2)X:.1,C:.3)R;'),
+                    3, nrep=1, maxIter=15, randseed=[1], threads=1,
+                    bw_time=True, root_time=10., leaf_time=0., annotate=annotate,
+                    CI_options=dict(nboots=5, p_lower=.025, p_upper=.975,
+                                    seed=123, samples_file=str(samples)))
+                return result, samples.read_bytes()
+            clean, clean_samples = fit(False)
+            annotated, annotated_samples = fit(True)
+            self.assertEqual(clean[1:], annotated[1:])
+            self.assertEqual(clean_samples, annotated_samples)
+            for a, b in zip(clean[0].traverse_postorder(), annotated[0].traverse_postorder()):
+                for attr in ('time', 'mu', 'divTime_CI', 'mu_CI', 'tau_CI'):
+                    self.assertEqual(getattr(a, attr, None), getattr(b, attr, None))
+                lower = float(re.search(r't_lower=([^,\]]+)', b.label).group(1))
+                upper = float(re.search(r't_upper=([^,\]]+)', b.label).group(1))
+                self.assertLessEqual(lower, upper)
+                self.assertEqual(lower, -b.divTime_CI[3])
+                self.assertEqual(upper, -b.divTime_CI[1])

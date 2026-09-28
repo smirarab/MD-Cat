@@ -363,6 +363,9 @@ def annotate_divergence_time(tree,bw_time=False,as_date=False,place_mu=True,plac
             _,t_lower,_,t_upper = node.divTime_CI
             divTime_lower = convert_divTime(t_lower,bw_time=bw_time,as_date=as_date) 
             divTime_upper = convert_divTime(t_upper,bw_time=bw_time,as_date=as_date) 
+            # Negating forward times reverses the numerical order of ages.
+            if bw_time and not as_date:
+                divTime_lower, divTime_upper = divTime_upper, divTime_lower
             tag += ",t_lower=" + str(divTime_lower)
             tag += ",t_upper=" + str(divTime_upper)
         if place_mu:
