@@ -5,7 +5,7 @@ import sys
 import tempfile
 import unittest
 
-from treeswift import read_tree_newick
+from treeswift import Node, Tree, read_tree_newick
 from emd.lca_lib import find_LCAs
 
 
@@ -19,6 +19,28 @@ class CalibrationLookupTest(unittest.TestCase):
     def test_valid_queries_include_internal_node_names(self):
         nodes = find_LCAs(self.tree, [['A', 'B'], ['A', 'C'], ['A'], ['X']])
         self.assertEqual([node.label for node in nodes], ['X', 'R', 'A', 'X'])
+
+    def test_deep_caterpillar_tree(self):
+        tree = Tree()
+        tree.root.label = 'N0'
+        node = tree.root
+        depth = max(3000, sys.getrecursionlimit() + 100)
+        for i in range(depth):
+            child = Node(label=f'N{i + 1}')
+            node.add_child(child)
+            node.add_child(Node(label=f'T{i}'))
+            node = child
+
+        queries = [
+            [f'N{depth}', f'T{depth - 1}'],
+            [f'N{depth}', 'T0'],
+            [f'T{depth - 1}', 'T1'],
+            [f'N{depth}'],
+            ['N100', f'N{depth}', 'T100'],
+        ]
+        nodes = find_LCAs(tree, queries)
+        self.assertEqual([node.label for node in nodes],
+                         [f'N{depth - 1}', 'N0', 'N1', f'N{depth}', 'N100'])
 
     def test_missing_names_reject_entire_query(self):
         for query in (['A', 'TYPO'], ['TYPO', 'A'], ['TYPO'],

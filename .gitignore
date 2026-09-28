@@ -8,6 +8,7 @@
 !/tests/test_sampling.py
 !/tests/test_summary_package.py
 !/tests/test_lca.py
+!/tests/test_rtt.py
 !/tests/test_time_scale.py
 !/tests/test_multinomial.py
 !/tests/test_internal_calibrations.py

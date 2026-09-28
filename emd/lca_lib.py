@@ -19,22 +19,25 @@ def find_LCAs(myTree,myQueries):
     # output: 
     #   + E: the euler tour
     #   + F: the index in E where each node first occurs
-    #   + H: the height (branch distance to root) of each node in E
-        E = []
-        H = {}
-        F = {}
-        def __traverse__(node,idx,h):
-            lb = node.label
-            E.append(node)
-            H[node] = h
-            F[lb] = idx
-            next_idx = idx+1
-            for c in node.children:
-                next_idx = __traverse__(c,next_idx,h+1)
-                E.append(node)
-                next_idx += 1
-            return next_idx    
-        __traverse__(myTree.root,0,1)
+    #   + H: the topological depth of each node (root depth is 1)
+        root = myTree.root
+        E = [root]
+        H = {root: 1}
+        F = {root.label: 0}
+        stack = [(root, iter(root.children))]
+        while stack:
+            node, children = stack[-1]
+            child = next(children, None)
+            if child is None:
+                stack.pop()
+                if stack:
+                    # Revisit the parent after completing each child subtree.
+                    E.append(stack[-1][0])
+            else:
+                F[child.label] = len(E)
+                H[child] = H[node] + 1
+                E.append(child)
+                stack.append((child, iter(child.children)))
         return E,F,H
     def min_segment_tree(E,H):
     # build a min segment-tree

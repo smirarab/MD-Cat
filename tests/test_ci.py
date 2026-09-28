@@ -1,6 +1,7 @@
 """CI solver fallback and failure regression tests."""
 import contextlib
 import io
+import random
 import unittest
 import tempfile
 from pathlib import Path
@@ -13,6 +14,51 @@ from emd import emd_normal_lib as emd
 
 
 class ConfidenceIntervalTest(unittest.TestCase):
+    def test_reused_inputs_preserve_seeded_draws_and_objectives(self):
+        rates = [3., .5, 1.5]
+        seed = 178
+        random.seed(seed)
+        expected = [emd.multinomial(rates, [1/3]*3).randomize()
+                    for _ in range(12)]
+        tree = read_tree_newick('(A:1,B:1);')
+        for idx, node in enumerate(tree.traverse_postorder()):
+            node.idx = idx
+        branches = np.array([.7, 1.2])
+        branches.setflags(write=False)
+        original_solve = cp.Problem.solve
+        original_draw = emd.multinomial.randomize
+        draws, objectives = [], []
+
+        def draw(distribution):
+            value = original_draw(distribution)
+            draws.append(value)
+            return value
+
+        def solve(problem, **kwargs):
+            problem.variables()[0].value = np.array([1., 1.])
+            objectives.append(float(problem.objective.value))
+            return original_solve(problem, solver=cp.OSQP, verbose=False)
+
+        with patch.object(emd.multinomial, 'randomize', draw), \
+             patch.object(emd, 'multinomial', wraps=emd.multinomial) as constructor, \
+             patch.object(emd, 'diags', wraps=emd.diags) as diagonal, \
+             patch.object(cp.Problem, 'solve', solve), \
+             contextlib.redirect_stdout(io.StringIO()):
+            emd.get_confidence_interval(
+                tree, {'A': 1., 'B': 1.}, [1., 1.], rates,
+                [[.2, .3, .5], [.1, .7, .2]], branches, 1000,
+                np.eye(2), [1., 1.],
+                dict(nboots=6, p_lower=.025, p_upper=.975, seed=seed))
+        self.assertEqual(draws, expected)
+        # Two posterior distributions plus one shared uniform distribution.
+        self.assertEqual(constructor.call_count, 3)
+        # One fixed weight matrix plus a rate diagonal for each draw.
+        self.assertEqual(diagonal.call_count, 7)
+        expected_objectives = [sum((b-m)**2/b for b, m in zip(branches, expected[i:i+2]))
+                               for i in range(0, 12, 2)]
+        np.testing.assert_allclose(objectives, expected_objectives, rtol=1e-14)
+        np.testing.assert_array_equal(branches, [.7, 1.2])
+
     def run_ci(self, nboots=2, lower=.025, upper=.975, samples_file=None, bw_time=False, seq_len=1000, target=1., rates=None):
         rates = [1.] if rates is None else rates
         tree = read_tree_newick('(A:1,B:1);')

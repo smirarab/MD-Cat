@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.13
+
+- This is misc. scalability fixes. 
+- Reuse unchanged branch observations, their weights, and the uniform rate
+  distribution across CI draws, avoiding redundant allocations while preserving
+  random draw order, objectives, and solver fallback/redraw behavior.
+- Compute RTT initialization in one postorder pass using centered regression
+  statistics, preserving the rate floor and unweighted average of clade slopes.
+- Replace recursive calibration Euler traversal with an explicit stack so
+  calibration lookup works on deeply unbalanced trees.
+
 ## 1.1.12 (important convention change)
 
 - This is a convention change. 

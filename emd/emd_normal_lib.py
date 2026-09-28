@@ -953,7 +953,10 @@ def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_
     N = len(b)
     k = len(omega)
     mu_boots = [np.zeros(N) for i in range(nboots)]
-    b_boots = [np.zeros(N) for i in range(nboots)]
+    # Branch observations and their weights are identical for every CI draw.
+    bb = np.asarray(b, dtype=float)
+    W = diags([sqrt(1/x) for x in bb], format='csc')
+    uniform_rates = multinomial(omega, [1/k]*k)
     tau_boots = [np.zeros(N) for i in range(nboots)]
     mu_avg = np.zeros(N)
     for node in tree.traverse_postorder():
@@ -965,11 +968,6 @@ def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_
         omega_upper = R.get_quantize(p_upper) 
         node.mu_CI = (p_lower,omega_lower/time_scale.span,p_upper,omega_upper/time_scale.span)
         mu_avg[node.idx] = sum(o*p for o,p in zip(omega,phi))
-        #for i in range(nboots):            
-        #    mu_boots[i][node.idx] = R.randomize()
-        #    b_boots[i][node.idx] = b[node.idx]
-            #b_boots[i][node.idx] = norm.rvs(b[node.idx],sqrt(b[node.idx]/s))
-            #tau_boots[i][node.idx] = max(EPS_tau,b_boots[i][node.idx]/mu_boots[i][node.idx])
 
     divTime_boots = [np.zeros(N+1) for i in range(nboots)]
     print("Confidence intervals: estimating {} samples".format(nboots), flush=True)
@@ -982,14 +980,10 @@ def get_confidence_interval(tree,smpl_times,tau,omega,Q,b,s,M,dt,CI_options,eps_
             for node in tree.traverse_postorder():
                 if node.is_root():
                     continue
-                R = multinomial(omega, [1/k]*k)
-                mu_boots[i][node.idx] = R.randomize()
-                b_boots[i][node.idx] = b[node.idx]
+                mu_boots[i][node.idx] = uniform_rates.randomize()
             mu = mu_boots[i]
-            bb = b_boots[i]
             var_tau = cp.Variable(N)
             # Omit unnecessary constant s (numerical issues).
-            W = diags([sqrt(1/x) for x in bb], format='csc')
             objective = cp.Minimize(cp.sum_squares(W @ (bb-diags(mu, format='csc') @ var_tau)))
             constraints = [np.zeros(N)+eps_tau <= var_tau, csr_matrix(M)@var_tau == np.array(dt)]
             prob = cp.Problem(objective,constraints)
