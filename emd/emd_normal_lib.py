@@ -571,28 +571,51 @@ def log_sum_exp(numlist):
     result = maxx + log(s)
     return result
 
-def run_Estep(b,s,omega,tau,phi,p_eps=EPS_tau,var_apprx=True):
-    N = len(b)
-    k = len(omega)
-    Q = []
+# Bound branch-by-category temporaries (roughly 2 MiB per float64 array).
+_EM_BLOCK_ELEMENTS = 262144
 
-    for b_i,tau_i in zip(b,tau): 
-        if b_i is None:
-            Q.append(None)
-            continue
-        lq_i = [0]*k
-        for j,(omega_j,phi_j) in enumerate(zip(omega,phi)):
-            var_ij = omega_j*tau_i/s if not var_apprx else b_i/s
-            lq_i[j] += (-(b_i-omega_j*tau_i)**2/2/var_ij + log(phi_j) - log(var_ij)/2)
-        s_lqi = log_sum_exp(lq_i)
-        q_i = [exp(x-s_lqi) for x in lq_i]
-        q_i = [x if x>MIN_q else MIN_q for x in q_i]
-        s_qi = sum(q_i)
-        if s_qi < 1e-10:
-            q_i = [1.0/k]*k
+
+def _branch_blocks(b, k):
+    """Yield observed branch indices and lengths without evaluating missing rows."""
+    size = max(1, _EM_BLOCK_ELEMENTS // max(1, k))
+    for start in range(0, len(b), size):
+        indices = np.array([i for i in range(start, min(start + size, len(b)))
+                            if b[i] is not None], dtype=int)
+        if indices.size:
+            yield indices, np.asarray([b[i] for i in indices], dtype=float)
+
+
+def _log_density_blocks(b, s, omega, tau, phi, var_apprx, likelihood=False):
+    """Mixture log densities with the scalar formulas' operation order."""
+    omega = np.asarray(omega, dtype=float)
+    log_phi = np.asarray([log(p) for p in phi], dtype=float)
+    for indices, lengths in _branch_blocks(b, len(omega)):
+        durations = np.asarray([tau[i] for i in indices], dtype=float)
+        mean = durations[:, None] * omega
+        variance = lengths[:, None] / s if var_apprx else mean / s
+        log_variance = (np.asarray([log(v) for v in variance[:, 0]])[:, None]
+                        if var_apprx else np.log(variance))
+        # float_power follows scalar **2 rounding; square/multiply can differ
+        # by an ulp and perturb subsequent constrained optimization.
+        penalty = np.float_power(lengths[:, None] - mean, 2) / 2 / variance
+        if likelihood:
+            logs = -log(sqrt(2*pi)) - log_variance / 2 - penalty + log_phi
         else:
-            q_i = [x/s_qi for x in q_i]
-        Q.append(q_i)
+            logs = -penalty + log_phi - log_variance / 2
+        yield indices, logs
+
+
+def run_Estep(b,s,omega,tau,phi,p_eps=EPS_tau,var_apprx=True):
+    Q = [None] * len(b)
+    for indices, logs in _log_density_blocks(b, s, omega, tau, phi, var_apprx):
+        # Keep scalar exp and normalization: ulp-sized posterior changes can
+        # be amplified by the constrained optimizer over many EM iterations.
+        for i, row in zip(indices, logs):
+            normalizer = log_sum_exp(row)
+            probabilities = [max(exp(x - normalizer), MIN_q) for x in row]
+            total = sum(probabilities)
+            Q[i] = ([1.0 / len(omega)] * len(omega) if total < 1e-10 else
+                    [p / total for p in probabilities])
     return Q
 
 def run_Mstep(tree,smplTimes,b,s,omega,tau,phi,Q,M,dt,eps_tau=EPS_tau,fixed_tau=False,fixed_omega=False,mu_avg=None,threads=None,solver_tolerances=None):
@@ -609,17 +632,10 @@ def run_Mstep(tree,smplTimes,b,s,omega,tau,phi,Q,M,dt,eps_tau=EPS_tau,fixed_tau=
     return tau_star, omega_star
     
 def f_ll(b,s,tau,omega,phi,var_apprx=True):
-    ll = 0
-    k = len(phi)
-    for (tau_i,b_i) in zip(tau,b):
-        if b_i is None:
-            continue
-        ll_i = [0]*k
-        for j,(omega_j,phi_j) in enumerate(zip(omega,phi)):
-            var_ij = tau_i*omega_j/s if not var_apprx else b_i/s
-            ll_i[j] += (-log(sqrt(2*pi))-(log(var_ij))/2-(b_i-tau_i*omega_j)**2/2/var_ij + log(phi_j))
-        result = log_sum_exp(ll_i)
-        ll += result
+    ll = 0.0
+    for _, logs in _log_density_blocks(b, s, omega, tau, phi, var_apprx, likelihood=True):
+        for row in logs:
+            ll += log_sum_exp(row)
     return ll
 
 def f_score(b,s,tau,omega,phi,var_apprx=True):
@@ -818,10 +834,23 @@ def compute_tau_star(tree,smplTimes,omega,Q,b,s,M,dt,eps_tau=EPS_tau,maxIter=500
 def compute_omega_star(tau,Q,b,phi,eps_omg=EPS_omg,mu_avg=None,maxIter=100):
 # IMPORTANT: only works with var_apprx. Never call this function
 # when var_apprx if False
-    N = len(tau)
     k = len(Q[0])
-    a = [2*sum(Q[i][j]*tau[i] for i in range(N)) for j in range(k)]
-    c = [2*sum(Q[i][j]*tau[i]*tau[i]/b[i] for i in range(N)) for j in range(k)]
+    a = np.zeros(k)
+    c = np.zeros(k)
+    for indices, lengths in _branch_blocks(b, k):
+        weights = np.asarray([Q[i] for i in indices], dtype=float)
+        durations = np.asarray([tau[i] for i in indices], dtype=float)
+        # Preserve the scalar multiplication and accumulation order. Tiny
+        # coefficient changes can alter the constrained solver's EM trajectory.
+        weighted_time = weights * durations[:, None]
+        weighted_square = weighted_time * durations[:, None] / lengths[:, None]
+        # Carry the previous block into the first add, not the final sum.
+        weighted_time[0] += a
+        weighted_square[0] += c
+        a = np.cumsum(weighted_time, axis=0)[-1]
+        c = np.cumsum(weighted_square, axis=0)[-1]
+    a *= 2
+    c *= 2
     
     def __solve_Lagrange__(A):
         omega_star = [eps_omg]*k
@@ -900,17 +929,19 @@ def compute_tau_star_cvxpy(tau,omega,Q,b,s,M,dt,eps_tau=EPS_tau,var_apprx=False,
     Pd = np.zeros(N)
     q = np.zeros(N)
 
-    for i in range(N):
-        if b[i] is None:
-            continue
-        for j in range(k):
-            if not var_apprx:
-                w_ij = omega[j]*tau[i] # weight by the variance multiplied with s; use previous tau to estimate
-            else:
-                w_ij = b[i]    
-            Pd[i] += Q[i][j]*omega[j]**2/w_ij
-            q[i] -= 2*b[i]*Q[i][j]*omega[j]/w_ij
-          
+    rates = np.asarray(omega, dtype=float)
+    squared_rates = np.float_power(rates, 2)
+    for indices, lengths in _branch_blocks(b, k):
+        weights = np.asarray([Q[i] for i in indices], dtype=float)
+        if var_apprx:
+            variance_weights = lengths[:, None]
+        else:
+            durations = np.asarray([tau[i] for i in indices], dtype=float)
+            variance_weights = durations[:, None] * rates
+        Pd[indices] = np.cumsum(weights * squared_rates / variance_weights, axis=1)[:, -1]
+        q[indices] = -np.cumsum(2 * lengths[:, None] * weights * rates /
+                               variance_weights, axis=1)[:, -1]
+
     P = diags(Pd, format='csc')
     var_tau = cp.Variable(N)
     

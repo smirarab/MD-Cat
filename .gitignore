@@ -17,6 +17,8 @@
 !/tests/test_em_consistency.py
 !/tests/test_solver_acceptance.py
 !/tests/test_sparse_optimization.py
+!/tests/test_vectorization.py
+!/tests/vectorization_reference.py
 *.tre
 *temp*
 *.pyc

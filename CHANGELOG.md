@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.15
+
+- Vectorize E-step and likelihood density calculations, rate-update reductions,
+  and duration-objective construction in bounded branch blocks. Retain scalar
+  stabilized normalization, posterior flooring, and accumulation order to avoid
+  amplifying rounding differences in sensitive constrained fits.
+- Complete fits ran 2.0–2.7 times faster in five local regression cases,
+  including three real-world calibration sets. Likelihoods, node times,
+  and branch rates matched the scalar implementation exactly in those runs.
+- Add scalar-reference regression tests for both variance modes, missing
+  branches, extreme log densities, rate constraints, and block boundaries.
+
 ## 1.1.14
 
 - Mostly input check and validation
