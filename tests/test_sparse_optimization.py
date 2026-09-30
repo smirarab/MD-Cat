@@ -2,6 +2,7 @@
 import contextlib
 import io
 import json
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -95,6 +96,26 @@ def dense_compute_tau(tau,omega,Q,b,s,M,dt,eps_tau=emd.EPS_tau,var_apprx=False,s
 
 
 class SparseOptimizationTest(unittest.TestCase):
+    def assert_trees_close(self, before, after):
+        old_nodes = list(before.traverse_postorder())
+        new_nodes = list(after.traverse_postorder())
+        self.assertEqual(len(old_nodes), len(new_nodes))
+        for old, new in zip(old_nodes, new_nodes):
+            # Fitted trees store numeric annotations in the node label.
+            old_label, _, old_annotations = str(old.label).partition('[')
+            new_label, _, new_annotations = str(new.label).partition('[')
+            self.assertEqual(old_label, new_label)
+            self.assertEqual(len(old.children), len(new.children))
+            # Branch lengths also carry serialized duration-CI annotations.
+            number = r'([-+]?(?:\d*\.\d+|\d+\.?\d*)(?:[eE][-+]?\d+)?)'
+            for old_text, new_text in ((old_annotations, new_annotations),
+                                       (str(old.edge_length), str(new.edge_length))):
+                a, b = re.split(number, old_text), re.split(number, new_text)
+                self.assertEqual(a[::2], b[::2])
+                np.testing.assert_allclose([float(x) for x in a[1::2]],
+                                           [float(x) for x in b[1::2]],
+                                           rtol=1e-12, atol=1e-12)
+
     def test_constraint_entries_match_dense_for_every_calibration_subset(self):
         labels = ['R', 'Z', 'X', 'Y', 'A', 'B', 'C', 'D', 'E']
         tree = '(((A:1,B:1)X:1,C:1)Z:1,(D:1,E:1)Y:1)R;'
@@ -143,9 +164,17 @@ class SparseOptimizationTest(unittest.TestCase):
                     before = fit()
                     before_samples = samples.read_bytes()
                 after = fit()
-                self.assertEqual(before[1:], after[1:])
-                self.assertEqual(before[0].newick(), after[0].newick())
-                self.assertEqual(before_samples, samples.read_bytes())
+                # Dense/sparse solver paths can differ at roundoff scale across
+                # numerical-library versions (CVXOPT on Python 3.10, for example).
+                # Keep tight numerical checks; checkpoint replay below remains exact.
+                for old, new in zip(before[1:], after[1:]):
+                    np.testing.assert_allclose(old, new, rtol=1e-12, atol=1e-12)
+                self.assert_trees_close(before[0], after[0])
+                old_samples = before_samples.decode().splitlines()
+                new_samples = samples.read_text().splitlines()
+                self.assertEqual(len(old_samples), len(new_samples))
+                for old, new in zip(old_samples, new_samples):
+                    self.assert_trees_close(read_tree_newick(old), read_tree_newick(new))
                 after_samples = samples.read_bytes()
                 self.assertEqual(resume(checkpoint)[0].newick(), after[0].newick())
                 self.assertEqual(after_samples, samples.read_bytes())

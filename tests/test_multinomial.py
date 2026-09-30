@@ -65,6 +65,26 @@ class CategoryOrderingTest(unittest.TestCase):
                 self.assertEqual(before, after)
 
 
+class EmpiricalHistogramTest(unittest.TestCase):
+    def test_jenks_bins_include_boundaries_and_final_observations(self):
+        cases = [
+            ([1., 2., 3., 4.], 2, [1.5, 3.5], [.5, .5]),
+            ([1., 1., 2., 2., 9., 9.], 2, [1.5, 9.], [2/3, 1/3]),
+            ([1., 2., 3., 4.], 1, [2.5], [1.]),
+            ([1., 2., 3.], 3, [1., 2., 3.], [1/3]*3),
+            ([2., 2., 2.], 1, [2.], [1.]),
+        ]
+        for observations, k, means, probabilities in cases:
+            with self.subTest(observations=observations, k=k), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                dist = distributions.emperical_histogram(observations, k)
+                self.assertEqual(dist.omega, means)
+                self.assertEqual(dist.phi, probabilities)
+                self.assertAlmostEqual(sum(dist.phi), 1.)
+                self.assertAlmostEqual(sum(o*p for o, p in zip(dist.omega, dist.phi)),
+                                       sum(observations)/len(observations))
+
+
 class CategoryValidationTest(unittest.TestCase):
     def test_invalid_inputs_are_rejected(self):
         cases = [

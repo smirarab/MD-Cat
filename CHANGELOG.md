@@ -2,6 +2,7 @@
 
 ## 1.1.15
 
+- This is a major scalability improvement, with speedups that can be as high as 10X.
 - Vectorize E-step and likelihood density calculations, rate-update reductions,
   and duration-objective construction in bounded branch blocks. Retain scalar
   stabilized normalization, posterior flooring, and accumulation order to avoid
@@ -11,10 +12,13 @@
   and branch rates matched the scalar implementation exactly in those runs.
 - Add scalar-reference regression tests for both variance modes, missing
   branches, extreme log densities, rate constraints, and block boundaries.
+- Fix empirical histogram binning to include observations on Jenks boundaries
+  and retain the final bin, producing probabilities that sum to one and restoring
+  the installed-package CI smoke test.
 
 ## 1.1.14
 
-- Mostly input check and validation
+- Mostly input check and validation changes. 
 - Reject ambiguous duplicate calibration references while allowing repeated
   internal support labels; assign unique labels to MRCA calibrations as needed.
 - Fix explicit tip renaming in calibration files (for example, `tip=A 2`).
@@ -24,12 +28,15 @@
 
 ## 1.1.13
 
-- This is misc. scalability fixes. 
+- This is a miscellaneous set of scalability fixes, with one that can change initialization results.
 - Reuse unchanged branch observations, their weights, and the uniform rate
   distribution across CI draws, avoiding redundant allocations while preserving
   random draw order, objectives, and solver fallback/redraw behavior.
 - Compute RTT initialization in one postorder pass using centered regression
   statistics, preserving the rate floor and unweighted average of clade slopes.
+  This also fixes floating-point cancellation that could assign spurious slopes
+  to clades with identical calibration times. The corrected RTT rate can change
+  fitted results and confidence intervals, even with identical inputs and seeds.
 - Replace recursive calibration Euler traversal with an explicit stack so
   calibration lookup works on deeply unbalanced trees.
 

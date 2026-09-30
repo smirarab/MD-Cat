@@ -160,7 +160,8 @@ def emperical_histogram(observes,k):
 
     for v in observes:
         #print(v,curr_break)
-        if v < curr_break:
+        # Jenks breaks are inclusive upper bounds for each class.
+        if v <= curr_break:
             curr_sum += v
             curr_count += 1
         else:
@@ -171,6 +172,10 @@ def emperical_histogram(observes,k):
             if brk_idx < k:
                 brk_idx += 1
                 curr_break = breaks[brk_idx]
+
+    # The loop flushes a bin only when the next one begins.
+    omega.append(curr_sum/curr_count)
+    phi.append(curr_count/N)
 
     print("Precision of the phi values: " + str(abs(1-sum(phi))))
 
