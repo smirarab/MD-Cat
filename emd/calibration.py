@@ -7,7 +7,7 @@ import json
 import hashlib
 
 
-def convert(text, single_bound="error"):
+def convert(text, single_bound="error", allow_distributions=False):
     """Return MD-CAT text and metadata, rejecting ambiguous calibrations."""
     calibrations = {}
     metadata = {}
@@ -17,7 +17,7 @@ def convert(text, single_bound="error"):
             continue
         key, sep, value = line.partition("=")
         key = key.strip().lower()
-        if key not in {"mrca", "min", "max", "treefile", "numsites", "seed", "nthreads"}:
+        if key not in {"mrca", "min", "max", "distribution", "treefile", "numsites", "seed", "nthreads"}:
             continue
         if not sep or not value.strip():
             raise ValueError(f"line {lineno}: missing value for {key}")
@@ -27,13 +27,21 @@ def convert(text, single_bound="error"):
             metadata[key] = value.strip()
             continue
         fields = value.split()
-        if (key == "mrca" and len(fields) < 3) or (key != "mrca" and len(fields) != 2):
+        if (key == "mrca" and len(fields) < 3) or (key == "distribution" and len(fields) < 2) or (key in ('min', 'max') and len(fields) != 2):
             raise ValueError(f"line {lineno}: malformed {key} directive")
         name = fields[0]
         entry = calibrations.setdefault(name, {})
         if key in entry:
             raise ValueError(f"line {lineno}: duplicate {key} for {name}")
-        if key == "mrca":
+        if key == 'distribution':
+            if not allow_distributions:
+                raise ValueError('distribution calibrations require the sampling workflow, not midpoint conversion')
+            from emd.calibration_distributions import parse_distribution
+            try:
+                entry[key] = parse_distribution(fields[1:])
+            except ValueError as exc:
+                raise ValueError(f'line {lineno}, {name}: {exc}') from exc
+        elif key == "mrca":
             if len(set(fields[1:])) < 2:
                 raise ValueError(f"line {lineno}: MRCA needs at least two distinct taxa")
             if any(any(c in token for c in "+=\"'") for token in fields):
@@ -52,6 +60,10 @@ def convert(text, single_bound="error"):
     for name, entry in calibrations.items():
         if "mrca" not in entry:
             raise ValueError(f"{name}: bound has no MRCA definition")
+        if 'distribution' in entry:
+            if 'min' in entry or 'max' in entry:
+                raise ValueError(f'{name}: use lower/upper in the distribution instead of min/max')
+            continue
         bounds = [entry[k] for k in ("min", "max") if k in entry]
         if not bounds:
             raise ValueError(f"{name}: no calibration bounds")
@@ -61,7 +73,7 @@ def convert(text, single_bound="error"):
             raise ValueError(f"{name}: min exceeds max")
         age = sum(bounds) / len(bounds)
         rows.append(f"{name}={'+'.join(entry['mrca'])}\t{age:f}\n")
-    if not rows:
+    if not calibrations:
         raise ValueError("no calibrations found")
     metadata['calibrations'] = calibrations
     return "".join(rows), metadata
@@ -105,12 +117,17 @@ def tree_constraints(metadata, tree_path, min_branch=0.001, allow_above_max=Fals
                 node = node.parent
             paths.append(path)
         node = next(n for n in paths[0] if all(n in p for p in paths[1:]))
+        if entry.get('monophyletic') and {n.label for n in node.traverse_leaves()} != set(entry['mrca']):
+            raise ValueError(f'{name}: calibration taxa are not a clade in the input tree')
         if node in nodes:
             raise ValueError(f"{name} and {names[nodes[node]]} resolve to the same node; combine these calibrations first")
         nodes[node] = i
-        lo = float(entry.get('min', entry.get('max')))
-        hi = float(entry.get('max', entry.get('min')))
-        target.append((lo + hi) / 2)
+        if 'distribution' in entry:
+            lo, hi = entry['distribution']['lower'], entry['distribution']['upper']
+        else:
+            lo = float(entry.get('min', entry.get('max')))
+            hi = float(entry.get('max', entry.get('min')))
+        target.append((lo + hi) / 2 if np.isfinite(hi) else lo)
         lower.append(max(lo, heights[node] * min_branch))
         upper.append(hi)
     matrix, gaps = [], []
@@ -203,6 +220,10 @@ def sample_to_folder(metadata, tree_path, output, count, seed, max_draws, min_br
         raise ValueError('unknown sampling strategy')
     if strategy == 'bottom-up' and allow_above_max:
         raise ValueError('bottom-up requires hard maxima (omit --allow-above-max)')
+    entries = metadata['calibrations']
+    explicit = any('distribution' in entry for entry in entries.values())
+    if explicit and allow_above_max:
+        raise ValueError('explicit distributions always enforce their truncation bounds; omit --allow-above-max')
     if output.exists():
         raise ValueError(f"output folder already exists: {output}")
     sampling_min_branch = min_branch * (1 + 1e-8)
@@ -215,20 +236,29 @@ def sample_to_folder(metadata, tree_path, output, count, seed, max_draws, min_br
         names, lower, upper, _, matrix, gaps, _ = tree_constraints(metadata, tree_path, sampling_min_branch, allow_above_max)
     entries = metadata['calibrations']
     # Draw from original bounds, not the tightened tip-distance bounds.
-    original_lower = np.array([float(entries[n].get('min', entries[n].get('max'))) for n in names])
+    original_lower = np.array([entries[n]['distribution']['lower'] if 'distribution' in entries[n]
+                               else float(entries[n].get('min', entries[n].get('max'))) for n in names])
+    densities = {}
+    if explicit:
+        from emd.calibration_distributions import CalibrationDensity
+        densities = {i: CalibrationDensity(entries[n]['distribution']) for i, n in enumerate(names)
+                     if 'distribution' in entries[n]}
     rng = np.random.Generator(np.random.PCG64(seed))
     parent = np.argmax(matrix, axis=1) if len(gaps) else []
     child = np.argmin(matrix, axis=1) if len(gaps) else []
     accepted, attempts = [], 0
     while len(accepted) < count and attempts < max_draws:
         size = min(10000, max_draws-attempts)
-        if strategy == 'bottom-up':
+        if explicit:
+            draws, valid = distribution_draws(rng, size, lower, upper, original_lower,
+                                             parent, child, gaps, densities, strategy, distribution)
+        elif strategy == 'bottom-up':
             draws, valid = bottom_up_draws(rng, size, lower, upper, parent, child, gaps, distribution)
         elif distribution == 'uniform':
             draws = rng.uniform(original_lower, upper, size=(size, len(names)))
         else:
             draws = original_lower + rng.exponential((upper-original_lower)/np.log(20), size=(size, len(names)))
-        if strategy == 'independent':
+        if strategy == 'independent' and not explicit:
             valid = np.ones(size, dtype=bool)
         valid &= np.all(draws >= lower, axis=1)
         if not allow_above_max:
@@ -261,5 +291,46 @@ def sample_to_folder(metadata, tree_path, output, count, seed, max_draws, min_br
                     tree_sha256=hashlib.sha256(tree_path.read_bytes()).hexdigest(),
                     config_sha256=metadata.get('config_sha256'),
                     config=metadata.get('config_path'), leaf_age=0)
+    if explicit:
+        import scipy
+        manifest.update(method=f'{strategy} per-node distributions, whole-vector rejection',
+                        distribution='per-node', legacy_distribution=distribution,
+                        exponential_scale=None, scipy_version=scipy.__version__,
+                        input_format=metadata.get('input_format', 'treepl'),
+                        node_distributions={n: {k: ('inf' if v == float('inf') else v)
+                                               for k, v in entries[n]['distribution'].items()}
+                                            for n in names if 'distribution' in entries[n]},
+                        bottom_up_explicit_rule='condition fixed density on descendant and tip age constraints' if strategy == 'bottom-up' else None)
     (output/'manifest.json').write_text(json.dumps(manifest, indent=2)+'\n')
     print(f"Wrote {count} samples to {output}; accepted {count}/{attempts} draws ({count/attempts:.3%}).", file=sys.stderr)
+
+
+def distribution_draws(rng, size, lower, upper, original_lower, parent, child,
+                       gaps, densities, strategy, legacy_distribution):
+    """Sample explicit densities, preserving the legacy model on bounds-only nodes."""
+    import numpy as np
+    descendants = [[] for _ in lower]
+    for p, c, gap in zip(parent, child, gaps):
+        descendants[p].append((c, gap))
+    order = (sorted(range(len(lower)), key=lambda i: (len(descendants[i]), i))
+             if strategy == 'bottom-up' else range(len(lower)))
+    draws = np.empty((size, len(lower)))
+    valid = np.ones(size, dtype=bool)
+    for i in order:
+        offset = np.full(size, lower[i] if strategy == 'bottom-up' else original_lower[i])
+        if strategy == 'bottom-up':
+            for c, gap in descendants[i]:
+                offset = np.maximum(offset, draws[:, c]+gap)
+        if i in densities:
+            try:
+                draws[:, i] = densities[i].draw(rng, offset)
+            except ValueError as exc:
+                raise ValueError(f'calibration column {i+1}: {exc}') from exc
+        else:
+            # Consume RNG for invalid rows, as in the legacy implementation.
+            safe = np.where(np.isfinite(offset), offset, upper[i])
+            width = np.maximum(upper[i]-safe, 0.)
+            draws[:, i] = safe + (rng.exponential(width/np.log(20))
+                                  if legacy_distribution == 'exponential' else rng.random(size)*width)
+        valid &= np.isfinite(offset) & (offset <= upper[i]) & np.isfinite(draws[:, i])
+    return draws, valid

@@ -219,6 +219,8 @@ The output tree ```output.nwk``` is ultrametric, has branch lengths in time unit
 
 ## Use case 4: Using calibration ranges with sampling
 
+### Per-node min/max calibrations
+
 Since version 1.1.0, `md_cat_sample.py` accepts treePL-style calibration ranges,
 samples fixed ages within them, and combines multiple dating runs into one
 summary tree. Each calibration in `calibrations.config` specifies an MRCA and
@@ -252,6 +254,37 @@ md_cat_sample.py -i input.nwk -t calibrations.config -o summary.nex \
 
 See the [algorithm and workflow guide](ALGORITHMS.md#sample-calibration-ranges-since-110) for input settings, output formats,
 parallel execution, resume, and partial summaries.
+
+### Per-node calibration distributions
+
+Since version **1.2.0**, each node can instead specify its own distribution and
+parameters:
+
+```text
+mrca = Myrtales Terminalia Eucalyptus
+distribution = Myrtales lognormal meanlog=2 sdlog=0.5 offset=80 lower=80 upper=120
+```
+
+Supported families are `exponential`, `uniform`, `lognormal`, `normal`, `gamma`,
+and MCMCTree-style `skew-t`. All support an additive `offset` and hard truncation
+with `lower`/`upper` in absolute backward-age units. For example:
+
+```text
+mrca = Root Terminalia Pinus
+distribution = Root skew-t location=200 scale=20 shape=6 df=2.2 lower=150 upper=400
+```
+
+Use the same sampling command above. Both `--strategy independent` and
+`--strategy bottom-up` work; bottom-up conditions each specified density on
+descendant ages without changing its parameters. Existing min/max calibrations
+retain their original behavior and can be mixed with explicit distributions.
+
+For compatibility, `-t` also accepts **BEAST 2 MRCA-prior XML** (exponential,
+uniform, lognormal, normal, gamma) and **MCMCTree calibration trees** with
+`ST(location,scale,shape,df)` or `G(shape,rate)` node annotations. Formats are
+detected automatically, or selected with `--calibration-format`. These import
+calibration densities only; they do not reproduce either program's full prior.
+See [parameters, examples, and import limits](ALGORITHMS.md#per-node-calibration-distributions).
 
 # Controlling CPU usage
 

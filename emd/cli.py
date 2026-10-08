@@ -73,7 +73,7 @@ def thread_limits(threads):
 def add_dating_options(parser, sampled=False):
     parser.add_argument('--version', action='version', version=f'{PROGRAM_NAME} {PROGRAM_VERSION}')
     parser.add_argument('-i', '--input', required=False, help='Input Newick tree (required for new analyses)' if sampled else 'Input Newick tree (required)')
-    parser.add_argument('-t', '--samplingTime', help='treePL calibration config (required for new analyses)' if sampled else 'Sampling times / fixed calibrations (default: none)')
+    parser.add_argument('-t', '--samplingTime', help='Calibration config, BEAST 2 XML, or MCMCTree calibration tree (required for new analyses)' if sampled else 'Sampling times / fixed calibrations (default: none)')
     parser.add_argument('-o', '--output', help='Final summary tree (default: INPUT.sampled.nex)' if sampled else 'Dated output tree (default: INPUT.mdcatTree)')
     parser.add_argument('-k', '--ncat', type=positive_int, default=50, help='Rate categories (default: 50)')
     parser.add_argument('-p', '--rep', type=positive_int, default=100, help='Optimization initializations per dating run (default: 100)')

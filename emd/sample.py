@@ -50,7 +50,7 @@ def exclusive(path):
 
 def parser():
     result = argparse.ArgumentParser(description=(
-        'Sample treePL bounds and run MD-CAT. Ages must be nonnegative backward '
+        'Sample calibration distributions or treePL bounds and run MD-CAT. Ages must be nonnegative backward '
         'times; all tips are present-day (0). Calendar/forward times are unsupported.'),
         epilog=('Defaults shown apply to new analyses. With --resume or '
                 '--summarize-only, omitted scientific settings, summary method, '
@@ -63,7 +63,9 @@ def parser():
     result.add_argument('--strategy', choices=('bottom-up', 'independent'), default='bottom-up',
                         help='Calibration sampling strategy (default: %(default)s)')
     result.add_argument('--distribution', choices=('exponential', 'uniform'), default='exponential',
-                        help='Calibration proposal distribution (default: %(default)s)')
+                        help='Proposal for min/max-only calibrations; explicit per-node distributions take precedence (default: %(default)s)')
+    result.add_argument('--calibration-format', choices=('auto', 'treepl', 'beast2', 'mcmctree'), default='auto',
+                        help='Calibration input format (default: detect automatically)')
     result.add_argument('--max-draws', type=positive_int, default=10000000,
                         help='Maximum calibration proposal attempts (default: %(default)s)')
     result.add_argument('--jobs', type=positive_int, default=1, help='Concurrent dating processes (default: 1)')
@@ -81,9 +83,10 @@ def parser():
 
 
 def create_plan(args):
-    from emd.calibration import convert, sample_to_folder
+    from emd.calibration import sample_to_folder
+    from emd.calibration_inputs import read_calibrations
     if not args.input or not args.samplingTime:
-        raise ValueError('new analyses require -i TREE and -t TREEPL_CONFIG')
+        raise ValueError('new analyses require -i TREE and -t CALIBRATION_FILE')
     source, config = Path(args.input).resolve(), Path(args.samplingTime).resolve()
     output = Path(args.output or (str(source)+'.sampled.nex')).resolve()
     workdir = (args.workdir or Path(str(output)+'.runs')).resolve()
@@ -93,7 +96,7 @@ def create_plan(args):
         raise ValueError(f'working directory exists: {workdir}; use --resume or --summarize-only')
     if any(Path(str(output)+suffix).exists() for suffix in ('', '.tsv', '.json')):
         raise ValueError(f'output already exists: {output}')
-    _, metadata = convert(config.read_text())
+    metadata = read_calibrations(config.read_text(), args.calibration_format)
     if args.randSeed is None and 'seed' in metadata:
         args.randSeed = seed_int(metadata['seed'])
     if args.threads is None:

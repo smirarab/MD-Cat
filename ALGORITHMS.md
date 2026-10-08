@@ -33,7 +33,7 @@ command does not accept `-b`, `-d`, `-r`, or `-f`. Positive numbers alone cannot
 identify the direction of a time scale; providing ages before present is the
 user's responsibility.
 
-The treePL input must define `mrca`, `min`, and `max` for each calibration. Both
+For legacy ranges, the treePL input must define `mrca`, `min`, and `max` for each calibration. Both
 bounds are required; equal bounds specify an exact age. The input tree is
 explicitly selected with `-i`, not the config's `treefile`. `numsites` supplies
 MD-CAT's sequence length (`-l`); an explicit `-l` overrides it. If neither is
@@ -46,6 +46,9 @@ TreePL's optimization settings, smoothing parameter, and output path are not
 used.
 
 ### Sampling distributions and branch durations
+
+The following describes min/max-only calibrations. Explicit per-node densities
+use the conditional sampling rules described in the next section.
 
 With `--strategy independent`, each age is drawn independently within its
 original interval. With `--strategy bottom-up`, calibrated descendants are drawn
@@ -74,6 +77,137 @@ relative numerical margin of `1e-8` above the requested bound when feasible
 finite and positive; very small values may challenge solver precision.
 Fitted branch lengths retain full floating-point precision to avoid rounding
 small positive durations to zero.
+
+### Per-node calibration distributions
+
+Use `distribution = NAME FAMILY key=value ...` in the same configuration as
+the MRCA definitions. Each node must have either a distribution or a min/max
+pair, never both. Parameters are case-sensitive; unknown, duplicate, missing,
+nonfinite, and invalid parameters fail before samples are written.
+
+```text
+numsites = 1000
+seed = 42
+mrca = AB A B
+distribution = AB exponential scale=5 offset=20 lower=20 upper=50
+mrca = Root A C
+distribution = Root skew-t location=60 scale=10 shape=6 df=2.2 lower=40 upper=100
+```
+
+| Family | Required parameters | Untruncated age before applying bounds |
+| --- | --- | --- |
+| `exponential` | `scale` | `offset + Exp(mean=scale)` |
+| `uniform` | `scale` | `offset + Uniform(0, scale)` |
+| `lognormal` | `meanlog`, `sdlog` | `offset + exp(Normal(meanlog, sdlog))` |
+| `normal` | `mean`, `sd` | `offset + Normal(mean, sd)` |
+| `gamma` | `shape`, `scale` | `offset + Gamma(shape, scale)` |
+| `skew-t` | `location`, `scale`, `shape`, `df` | `offset + AzzaliniSkewT(location, scale, shape, df)` |
+
+Every family accepts `offset` (default 0), `lower` (default 0), and `upper`
+(default `inf`). Bounds are **absolute ages after shifting**, not distances
+from the offset. They truncate and renormalize the distribution. They do not
+clip samples to endpoints. Scale, standard deviation, degrees of freedom,
+and Gamma shape must be positive. Bounds require `0 <= lower < upper`;
+support must have positive width. Fixed ages continue to use equal min/max.
+For uniform ages from 80 to 100, use `uniform offset=80 scale=20`.
+
+The lognormal parameters describe the natural logarithm of age minus offset.
+Gamma uses **scale**, not rate (`scale = 1/rate`). Normal mean and skew-t
+location are not hard minima: use `lower` to enforce a minimum. For positive
+families, the offset already establishes a minimum, and `lower` can tighten it.
+All dates must share a unit and refer backward from present-day tips.
+
+The skew-t is MCMCTree's Azzalini distribution. For
+`z = (age - offset - location)/scale`, its untruncated density is
+`2/scale * t_pdf(z, df) * t_cdf(shape*z*sqrt((df+1)/(df+z*z)), df+1)`.
+Positive shape produces the long tail toward older ages; negative shape
+reverses it. Shape zero is ordinary Student's t. It is not SciPy's
+Jones–Faddy skew-t. See the [MCMCTree calibration documentation](https://github.com/abacus-gene/paml/wiki/MCMCtree).
+
+**Independent:** draw each specified density within its own truncation bounds,
+then reject the complete vector if any tip-distance or ancestor constraint
+fails. Accepted vectors follow the product of the input densities conditioned
+on tree feasibility.
+
+**Bottom-up:** draw descendants first. For each node, raise its conditional
+lower bound to the maximum of its own lower bound, the tip-distance constraint,
+and every calibrated descendant's age plus intervening minimum durations.
+Draw from the original density conditioned on this interval. Keep the supplied
+offset, location, scale, and other parameters fixed. Reject the entire vector
+if an ancestor has no interval left. This is a different joint distribution
+from independent rejection; accepted marginal distributions generally differ
+from input distributions under either strategy.
+
+This differs from the legacy bottom-up exponential rule, which recomputes
+scale from each new offset. In mixed files, min/max-only nodes retain that
+legacy rule and obey `--distribution`; explicit densities take precedence.
+Uncalibrated nodes only propagate duration constraints.
+
+Sampling uses inverse CDFs, with survival probabilities for right tails and
+specialized truncated normal/exponential calculations. Skew-t uses exact
+rejection from a truncated Student's t envelope. Numerically unresolvable
+intervals raise an error rather than silently becoming point masses. Skew-t
+has an internal cap of 10,000 proposals per age; `--max-draws` limits complete
+calibration-vector attempts, not these internal proposals. Manifests record
+normalized per-node parameters, detected format, SciPy/NumPy versions, and seeds.
+For identical inputs, versions, and seeds the calibration samples are reproducible.
+
+#### Importing existing calibration files
+
+`--calibration-format auto` (the default) detects XML, a Newick/MCMCTree tree,
+or a treePL-style config. Override with `beast2`, `mcmctree`, or `treepl`.
+The substitution tree always comes from `-i`. Imports supply calibration
+densities only: tree priors, clock models, MCMC settings, and soft-bound
+semantics are not inferred. BEAST/MCMCTree imports use the workflow defaults
+for sequence length, seed, and threads unless supplied on the command line.
+
+**MCMCTree:** accepts one semicolon-terminated Newick tree, optionally preceded
+by the usual `taxon-count 1` header. Quoted internal-node calibrations may be
+`ST(location,scale,shape,df)` or `G(shape,rate)`:
+
+```text
+3 1
+((A,B)'ST(20,5,6,2.2)',C)'G(10,0.2)';
+```
+
+The taxa below each annotated node must form the same clade in the `-i` tree.
+Imported ages are truncated at zero, as in MCMCTree. Gamma rate is converted
+to scale. Other annotations, including soft `B`, `L`, `U` bounds, fail explicitly;
+they must not be treated as hard uniform/exponential bounds. For additional
+offsets or truncation, express the same density in the config syntax above.
+
+**BEAST 2:** accepts `MRCAPrior` elements with explicit taxa and fixed scalar
+`Exponential`, `Uniform`, `LogNormalDistributionModel`, `Normal`, or `Gamma`
+distributions. For example, this calibration-only XML supplies the same
+exponential density as `exponential offset=20 scale=5`:
+
+```xml
+<beast>
+  <distribution id="AB.prior" spec="beast.base.evolution.tree.MRCAPrior">
+    <taxonset spec="TaxonSet">
+      <taxon id="A" spec="Taxon"/>
+      <taxon id="B" spec="Taxon"/>
+    </taxonset>
+    <distr spec="beast.base.inference.distribution.Exponential" mean="5" offset="20"/>
+  </distribution>
+</beast>
+```
+
+This minimal fragment omits BEAST's analysis tree; a full BEAST analysis XML
+can also be supplied. The reader supports `idref`/`@id` references, standard
+`map` aliases, scalar attributes, and nested scalar parameters. It preserves
+BEAST's exponential mean, normal sigma or precision tau, lognormal M/S and
+`meanInRealSpace`, distribution offsets, and Gamma parameterization modes.
+See [BEAST's MRCA prior](https://www.beast2.org/xml/beast.base.evolution.tree.MRCAPrior.html)
+and [distribution reference](https://www.beast2.org/xml/contents.html).
+
+Taxon sets must explicitly list taxa; alignment-derived sets, templates,
+estimated hyperparameters, plugins/custom distributions, tip-only or
+originate priors, dated-tip trees, and multiple calibration trees are rejected.
+`monophyletic=true` is checked against the supplied tree. BEAST distributions
+are additionally conditioned on nonnegative ages. BEAST's standard normal and
+Gamma elements do not provide our general truncation fields; use the config
+syntax for hard bounds rather than adding unsupported XML attributes.
 
 ### Three different replication counts
 

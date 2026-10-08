@@ -6,6 +6,7 @@
 !/tests/test_ci.py
 !/tests/test_ci_cli.py
 !/tests/test_sampling.py
+!/tests/test_calibration_distributions.py
 !/tests/test_summary_package.py
 !/tests/test_lca.py
 !/tests/test_rtt.py

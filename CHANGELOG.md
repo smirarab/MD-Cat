@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.0
+
+- Add per-node exponential, uniform, lognormal, normal, Gamma, and MCMCTree
+  Azzalini skew-t calibration densities with offsets and hard truncation bounds.
+- Support independent rejection and bottom-up conditional sampling while
+  preserving existing min/max-only sampling behavior.
+- Import supported BEAST 2 MRCA priors and MCMCTree `ST`/`G` calibration trees;
+  reject unsupported calibration semantics explicitly.
+- Record per-node density parameters and numerical-library versions in sampling
+  manifests; add distributional, tail, format, CLI, and reproducibility tests.
+
 ## 1.1.15
 
 - This is a major scalability improvement, with speedups that can be as high as 10X.
